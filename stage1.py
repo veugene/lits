@@ -46,11 +46,9 @@ def train(model, num_classes, batch_size, val_batch_size,
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     
-    #model.compile(loss=masked_dice_loss,
-                  #optimizer=optimizer,
-                  #metrics=[accuracy])
     model.compile(loss=masked_dice_loss,
-                  optimizer=optimizer)
+                  optimizer=optimizer,
+                  metrics=[accuracy, masked_dice_loss])
 
     '''
     Print model summary
@@ -72,7 +70,7 @@ def train(model, num_classes, batch_size, val_batch_size,
     gen_valid = data_generator(volume_indices=volume_indices['valid'],
                                batch_size=batch_size,
                                shuffle=False,
-                               loop_forever=False,
+                               loop_forever=True,
                                transform_kwargs=None,
                                **data_gen_kwargs)
 
@@ -89,8 +87,9 @@ def train(model, num_classes, batch_size, val_batch_size,
     # Define model saving callback
     checkpointer_best = ModelCheckpoint(filepath=os.path.join(save_path,
                                                           "best_weights.hdf5"),
-                                        verbose=0,
-                                        monitor='val_acc', mode='max',
+                                        verbose=1,
+                                        monitor='val_masked_dice_loss',
+                                        mode='max',
                                         save_best_only=True,
                                         save_weights_only=False)
     callbacks.append(checkpointer_best)
@@ -118,18 +117,18 @@ def train(model, num_classes, batch_size, val_batch_size,
                                   validation_data=gen_valid.flow(),
                                   nb_val_samples=gen_valid.num_samples,
                                   callbacks=callbacks)
-
+                                  
 
 def main():
     '''
     Configurable parameters
     '''
     general_settings = OrderedDict((
-        ('experiment_ID', "001b"),
+        ('experiment_ID', "001"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
-                                     "Experiments/lits/results"))
+                                     "Experiments/lits/results/stage1"))
         ))
     
     resunet_model_kwargs = OrderedDict((
@@ -141,13 +140,14 @@ def main():
         ('num_init_blocks', 2),
         ('weight_decay', 0.0005), 
         ('dropout', 0.05),
+        ('batch_norm', True),
         ('short_skip', True),
         ('long_skip', True),
         ('long_skip_merge_mode', 'sum'),
         ('use_skip_blocks', False),
         ('relative_num_across_filters', 1),
         ('mainblock', basic_block),
-        ('initblock', basic_block_mp)
+        ('initblock', basic_block_mp),
         ))
     
     data_gen_kwargs = OrderedDict((
@@ -167,7 +167,7 @@ def main():
         ('channel_shift_range', 0.),
         ('fill_mode', 'constant'),
         ('cval', 0.),
-        ('cvalMask', 2),
+        ('cvalMask', 0),
         ('horizontal_flip', True),
         ('vertical_flip', True),
         ('rescale', None),
@@ -188,7 +188,7 @@ def main():
         
         # optimizer
         ('optimizer', 'RMSprop'),   # options: 'RMSprop'
-        ('learning_rate', 0.01),
+        ('learning_rate', 0.001),
         
         # other
         ('show_model', False),
