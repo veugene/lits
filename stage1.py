@@ -182,7 +182,7 @@ def main():
         ('num_classes', 1),
         ('batch_size', 40),
         ('val_batch_size', 200),
-        ('num_epochs', 1000),
+        ('num_epochs', 250),
         ('max_patience', 50),
         ('samples_per_epoch', 1040),
         
@@ -233,19 +233,28 @@ def main():
     '''
     experiment_dir = os.path.join(general_settings['results_dir'],
                                   general_settings['experiment_ID'])
+    model = None
     if os.path.exists(experiment_dir):
         print("")
         print("WARNING! Results directory exists: \"{}\"".format(experiment_dir))
         write_into = None
         while write_into not in ['y', 'n', 'r', '']:
             write_into = str.lower(input( \
-                             "Write into existing directory? [y/N/r(eplace)]"))
+                         "Write into existing directory?\n"
+                         "    y : yes\n"
+                         "    n : no (default)\n"
+                         "    r : delete and replace directory\n"
+                         "    c : continue/resume training\n"))
         if write_into in ['n', '']:
             print("Aborted")
             sys.exit()
         if write_into=='r':
-            shutil.rmtree(experiment_dir)
             print("WARNING: Deleting existing results directory.")
+            shutil.rmtree(experiment_dir)
+        if write_into=='c':
+            print("Attempting to load model state and continue training.")
+            model = keras.models.load_model(os.path.join(experiment_dir,
+                                            "weights.hdf5"))
         print("")
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
@@ -260,19 +269,20 @@ def main():
     '''
     Assemble model
     '''
-    print('\n > Building model...')
-    # Increase the recursion limit to handle resnet skip connections
-    sys.setrecursionlimit(99999)
-    model = assemble_model(**resunet_model_kwargs)
-    print("   number of parameters : ", model.count_params())
+    if model is None:
+        print('\n > Building model...')
+        # Increase the recursion limit to handle resnet skip connections
+        sys.setrecursionlimit(99999)
+        model = assemble_model(**resunet_model_kwargs)
+        print("   number of parameters : ", model.count_params())
     
-    '''
-    Save the model in yaml form
-    '''
-    yaml_string = model.to_yaml()
-    open(os.path.join(experiment_dir, "model_" +
-                      str(general_settings['experiment_ID']) +
-                      ".yaml"), 'w').write(yaml_string)
+        '''
+        Save the model in yaml form
+        '''
+        yaml_string = model.to_yaml()
+        open(os.path.join(experiment_dir, "model_" +
+                          str(general_settings['experiment_ID']) +
+                          ".yaml"), 'w').write(yaml_string)
     
     '''
     Run experiment
