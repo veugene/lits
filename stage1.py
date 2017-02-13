@@ -10,6 +10,7 @@ sys.path.append("../")
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.optimizers import RMSprop
 from keras import backend as K
+import keras
 # from keras.utils.visualize_util import plot
 
 # Import in-house libraries
@@ -238,7 +239,7 @@ def main():
         print("")
         print("WARNING! Results directory exists: \"{}\"".format(experiment_dir))
         write_into = None
-        while write_into not in ['y', 'n', 'r', '']:
+        while write_into not in ['y', 'n', 'r', 'c', '']:
             write_into = str.lower(input( \
                          "Write into existing directory?\n"
                          "    y : yes\n"
@@ -253,8 +254,9 @@ def main():
             shutil.rmtree(experiment_dir)
         if write_into=='c':
             print("Attempting to load model state and continue training.")
-            model = keras.models.load_model(os.path.join(experiment_dir,
-                                            "weights.hdf5"))
+            model = keras.models.load_model( \
+                os.path.join(experiment_dir, "weights.hdf5"),
+                custom_objects={'masked_dice_loss': masked_dice_loss})
         print("")
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
