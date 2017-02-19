@@ -90,7 +90,7 @@ def train(model, num_classes, batch_size, val_batch_size,
                                                           "best_weights.hdf5"),
                                         verbose=1,
                                         monitor='val_masked_dice_loss',
-                                        mode='max',
+                                        mode='min ',
                                         save_best_only=True,
                                         save_weights_only=False)
     callbacks.append(checkpointer_best)
