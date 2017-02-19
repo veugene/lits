@@ -2,7 +2,6 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 import os
-import sys
 import seaborn
 from collections import OrderedDict
 import numpy as np
@@ -42,10 +41,15 @@ def scrub(path, keys):
         history[key] = OrderedDict()
         history_summary[key] = []
     with open(path, 'rt') as f:
+        last_epoch, epoch = None, 0
         for line in f:
             # Split by ' - ' and ':' plus any surrounding non alpha-num chars.
             split_line = re.split('[: ]+', line)
-            epoch = split_line[1]
+            if last_epoch is None:
+                last_epoch = split_line[1]
+            if split_line[1] != last_epoch:
+                epoch += 1
+            last_epoch = split_line[1]
             for key in keys:
                 if epoch not in history[key]:
                     history[key][epoch] = []
@@ -56,31 +60,27 @@ def scrub(path, keys):
     # Average keys over each epoch.
     for key in keys:
         for epoch in history[key]:
-            history_summary[key].append( np.mean(history[key][epoch]) )
-    
-    # Print the highest Dice score
-    max_value = 0
-    for i,value in enumerate(history_summary['val_masked_dice_loss']):
-       value = -value # Reverse Dice loss
-       if value > max_value:
-           max_value = value
-           best_idx = i
-    print('Best val dice : ', history_summary['val_masked_dice_loss'][best_idx])
-    print('Average train dice at best val dice : ', history_summary['masked_dice_loss'][best_idx])
-
+            if history[key][epoch]:
+                history_summary[key].append( np.mean(history[key][epoch]) )
+                    
     return history_summary
 
 
 if __name__=='__main__':
     # Get all arguments
-    try:
-        args = parse()
-    except:
-        print('Error')
-        sys.exit()
+    args = parse()
     
     # Read log file
     history = scrub(args.source, args.keys)
+    
+    # TEMP
+    # Print best score
+    idx = np.argmin(history['val_masked_dice_loss'])
+    print("Best validation dice: {}"
+          "".format(history['val_masked_dice_loss'][idx]))
+    print("-- training loss: {}".format(history['masked_dice_loss'][idx]))
+    print("-- epoch {} of {}".format(idx+1, len(history['masked_dice_loss'])))
+    # /TEMP
     
      # Color generator for the plots
     def gen_colors(num_colors):
