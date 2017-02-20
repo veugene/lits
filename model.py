@@ -109,14 +109,33 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     Merge tensors, changing the number of feature maps in the first input
     to match that of the second input. Feature maps in the first input are
     reweighted.
+    
+    If weight sharing is enabled, reuse old convolutions.
     '''
-    def merge_in(x, into):
+    def merge_into(x, into, skips, cycle, direction, depth):
         if x._keras_shape[1] != into._keras_shape[1]:
-            x = Convolution2D(into._keras_shape[1], 1, 1,
-                              init='he_normal', border_mode='valid',
-                              W_regularizer=_l2(weight_decay))(x)
+            if cycles_share_weights and depth in skips[cycle-1][direction]:
+                conv_layer = skips[cycle-1][direction][depth]
+            else:
+                conv_layer = Convolution2D(into._keras_shape[1], 1, 1,
+                                           init='he_normal',
+                                           border_mode='valid',
+                                           W_regularizer=_l2(weight_decay))
+            skips[cycle][direction][depth] = conv_layer
+            x = conv_layer(x)
         out = merge([x, into], mode='sum')
         return out
+        #return x
+    
+    '''
+    Given some block function and an input tensor, return a reusable model
+    instantiating that block function. This is to allow weight sharing.
+    '''
+    def make_block(block_func, x, cycle=0):
+        x_nb_filter = x._keras_shape[1]
+        input = Input(shape=(x_nb_filter, None, None))
+        model = Model(input, block_func(input))
+        return model
     
     '''
     Constant kwargs passed to the init and main blocks.
@@ -135,27 +154,31 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     '''
     Build the blocks for all cycles, contracting and expanding in each cycle.
     '''
-    tensors = []
-    layers = []
+    tensors = [] # feature tensors
+    blocks = []  # residual block layers
+    skips = []   # 1x1 kernel convolution layers on long skip connections
     x = input
     for cycle in range(num_cycles):
         # Create tensors and layer lists for this cycle.
         tensors.append({'down': {}, 'up': {}, 'across': {}})
-        layers.append({'down': {}, 'up': {}, 'across': {}})
+        blocks.append({'down': {}, 'up': {}, 'across': {}})
+        skips.append({'down': {}, 'up': {}, 'across': {}})
         
         # First block
         if cycle > 0:
-            x = merge_in(x, tensors[cycle-1]['up'][0])
+            x = merge_into(x, tensors[cycle-1]['up'][0], skips=skips,
+                           cycle=cycle, direction='down', depth=0)
         if cycles_share_weights and cycle > 0:
-            block = layers[cycle-1]['down'][0]
+            block = blocks[cycle-1]['down'][0]
         else:
-            block = firstblock(nb_filter=input_num_filters,
-                               subsample=False,
-                               upsample=False,
-                               skip=False,
-                               **block_kwargs)
+            block_func = firstblock(nb_filter=input_num_filters,
+                                    subsample=False,
+                                    upsample=False,
+                                    skip=False,
+                                    **block_kwargs)
+            block = make_block(block_func, x, cycle)
         x = block(x)
-        layers[cycle]['down'][0] = block
+        blocks[cycle]['down'][0] = block
         tensors[cycle]['down'][0] = x
         print("Cycle {} - FIRST DOWN: {}".format(cycle, x._keras_shape))
         
@@ -163,19 +186,21 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         for b in range(num_init_blocks):
             depth = b+1
             if cycle > 0:
-                x = merge_in(x, tensors[cycle-1]['up'][depth])
+                x = merge_into(x, tensors[cycle-1]['up'][depth], skips=skips,
+                               cycle=cycle, direction='down', depth=depth)
             if cycles_share_weights and cycle > 0:
-                block = layers[cycle-1]['down'][depth]
+                block = blocks[cycle-1]['down'][depth]
             else:
-                block = residual_block(initblock,
-                                       nb_filter=input_num_filters,
-                                       repetitions=1,
-                                       skip=True,
-                                       subsample=True,
-                                       upsample=False,
-                                       **block_kwargs)
+                block_func = residual_block(initblock,
+                                            nb_filter=input_num_filters,
+                                            repetitions=1,
+                                            skip=True,
+                                            subsample=True,
+                                            upsample=False,
+                                            **block_kwargs)
+                block = make_block(block_func, x, cycle)
             x = block(x)
-            layers[cycle]['down'][depth] = block
+            blocks[cycle]['down'][depth] = block
             tensors[cycle]['down'][depth] = x
             print("Cycle {} - INIT DOWN {}: {}".format(cycle, b,
                                                        x._keras_shape))
@@ -184,57 +209,64 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         for b in range(num_main_blocks):
             depth = b+1+num_init_blocks
             if cycle > 0:
-                x = merge_in(x, tensors[cycle-1]['up'][depth])
+                x = merge_into(x, tensors[cycle-1]['up'][depth], skips=skips,
+                               cycle=cycle, direction='down', depth=depth)
             if cycles_share_weights and cycle > 0:
-                block = layers[cycle-1]['down'][depth]
+                block = blocks[cycle-1]['down'][depth]
             else:
-                block = residual_block(mainblock,
-                                       nb_filter=input_num_filters*(2**b),
-                                       repetitions=get_repetitions(b),
-                                       skip=True,
-                                       subsample=True,
-                                       upsample=False,
-                                       **block_kwargs)
+                block_func = residual_block(mainblock,
+                                            nb_filter=input_num_filters*(2**b),
+                                            repetitions=get_repetitions(b),
+                                            skip=True,
+                                            subsample=True,
+                                            upsample=False,
+                                            **block_kwargs)
+                block = make_block(block_func, x, cycle)
             x = block(x)
-            layers[cycle]['down'][depth] = block
+            blocks[cycle]['down'][depth] = block
             tensors[cycle]['down'][depth] = x
             print("Cycle {} - MAIN DOWN {}: {}".format(cycle, b,
                                                        x._keras_shape))
             
         # ACROSS
+        if cycle > 0:
+            x = merge_into(x, tensors[cycle-1]['across'][0], skips=skips,
+                           cycle=cycle, direction='across', depth=0)
         if cycles_share_weights and cycle > 0:
-            block = layers[cycle-1]['across'][0]
+            block = blocks[cycle-1]['across'][0]
         else:
-            block = residual_block(mainblock,
+            block_func = residual_block( \
+                                  mainblock,
                                   nb_filter=input_num_filters*(2**b),
                                   repetitions=get_repetitions(num_main_blocks),
                                   skip=True,
                                   subsample=True,
                                   upsample=True,
                                   **block_kwargs)
+            block = make_block(block_func, x, cycle)
         x = block(x)
-        if cycle > 0:
-            x = merge_in(x, tensors[cycle-1]['across'][0])
-        layers[cycle]['across'][0] = block
+        blocks[cycle]['across'][0] = block
         tensors[cycle]['across'][0] = x
         print("Cycle {} - ACROSS: {}".format(cycle, x._keras_shape))
 
         # UP (resnet blocks)
         for b in range(num_main_blocks-1, -1, -1):
             depth = b+1+num_init_blocks
-            x = merge_in(x, tensors[cycle]['down'][depth])
+            x = merge_into(x, tensors[cycle]['down'][depth], skips=skips,
+                           cycle=cycle, direction='up', depth=depth)
             if cycles_share_weights and cycle > 0:
-                block = layers[cycle-1]['up'][depth]
+                block = blocks[cycle-1]['up'][depth]
             else:
-                block = residual_block(mainblock,
-                                       nb_filter=input_num_filters*(2**b),
-                                       repetitions=get_repetitions(b),
-                                       skip=True,
-                                       subsample=False,
-                                       upsample=True,
-                                       **block_kwargs)
+                block_func = residual_block(mainblock,
+                                            nb_filter=input_num_filters*(2**b),
+                                            repetitions=get_repetitions(b),
+                                            skip=True,
+                                            subsample=False,
+                                            upsample=True,
+                                            **block_kwargs)
+                block = make_block(block_func, x, cycle)
             x = block(x)
-            layers[cycle]['up'][depth] = block
+            blocks[cycle]['up'][depth] = block
             tensors[cycle]['up'][depth] = x
             print("Cycle {} - MAIN UP {}: {}".format(cycle, b,
                                                      x._keras_shape))
@@ -242,35 +274,39 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         # UP (final upsampling blocks)
         for b in range(num_init_blocks-1, -1, -1):
             depth = b+1
-            x = merge_in(x, tensors[cycle]['down'][depth])
+            x = merge_into(x, tensors[cycle]['down'][depth], skips=skips,
+                           cycle=cycle, direction='up', depth=depth)
             if cycles_share_weights and cycle > 0:
-                block = layers[cycle-1]['up'][depth]
+                block = blocks[cycle-1]['up'][depth]
             else:
-                block = residual_block(initblock,
-                                       nb_filter=input_num_filters,
-                                       repetitions=1,
-                                       skip=True,
-                                       subsample=False,
-                                       upsample=True,
-                                       **block_kwargs)
+                block_func = residual_block(initblock,
+                                            nb_filter=input_num_filters,
+                                            repetitions=1,
+                                            skip=True,
+                                            subsample=False,
+                                            upsample=True,
+                                            **block_kwargs)
+                block = make_block(block_func, x, cycle)
             x = block(x)
-            layers[cycle]['up'][depth] = block
+            blocks[cycle]['up'][depth] = block
             tensors[cycle]['up'][depth] = x
             print("Cycle {} - INIT UP {}: {}".format(cycle, b,
                                                      x._keras_shape))
             
         # Final block
-        x = merge_in(x, tensors[cycle]['down'][0])
+        x = merge_into(x, tensors[cycle]['down'][0], skips=skips,
+                       cycle=cycle, direction='up', depth=0)
         if cycles_share_weights and cycle > 0:
-            block = layers[cycle-1]['up'][0]
+            block = blocks[cycle-1]['up'][0]
         else:
-            block = firstblock(nb_filter=input_num_filters,
-                               subsample=False,
-                               upsample=False,
-                               skip=False,
-                               **block_kwargs)
+            block_func = firstblock(nb_filter=input_num_filters,
+                                    subsample=False,
+                                    upsample=False,
+                                    skip=False,
+                                    **block_kwargs)
+            block = make_block(block_func, x, cycle)
         x = block(x)
-        layers[cycle]['up'][0] = block
+        blocks[cycle]['up'][0] = block
         tensors[cycle]['up'][0] = x
         print("Cycle {} - FIRST UP: {}".format(cycle, x._keras_shape))
             

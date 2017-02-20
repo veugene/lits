@@ -143,9 +143,9 @@ def main():
         ('weight_decay', 0.0005), 
         ('dropout', 0.05),
         ('batch_norm', True),
-        ('mainblock', bottleneck),
+        ('mainblock', basic_block),
         ('initblock', basic_block_mp),
-        ('cycles_share_weights', True)
+        ('cycles_share_weights', False)
         ))
     
     data_gen_kwargs = OrderedDict((
