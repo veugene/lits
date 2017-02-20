@@ -11,12 +11,11 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.optimizers import RMSprop
 from keras import backend as K
 import keras
-# from keras.utils.visualize_util import plot
 
 # Import in-house libraries
+from model import assemble_model
 from fcn_plusplus.lib.loss import masked_dice_loss
 from fcn_plusplus.lib.logging import FileLogger
-from fcn_plusplus.lib.resunet import assemble_model
 from fcn_plusplus.lib.blocks import (bottleneck,
                                      basic_block,
                                      basic_block_mp)
@@ -55,8 +54,9 @@ def train(model, num_classes, batch_size, val_batch_size,
     Print model summary
     '''
     if show_model:
-        model.summary()
-        # plot(model, to_file=save_path+'model.png')
+        from keras.utils.visualize_util import plot
+        #model.summary()
+        plot(model, to_file=os.path.join(save_path, 'model.png'))
 
     '''
     Data generators for training and validation sets
@@ -90,7 +90,7 @@ def train(model, num_classes, batch_size, val_batch_size,
                                                           "best_weights.hdf5"),
                                         verbose=1,
                                         monitor='val_masked_dice_loss',
-                                        mode='min ',
+                                        mode='min',
                                         save_best_only=True,
                                         save_weights_only=False)
     callbacks.append(checkpointer_best)
@@ -125,30 +125,27 @@ def main():
     Configurable parameters
     '''
     general_settings = OrderedDict((
-        ('experiment_ID', "001"),
+        ('experiment_ID', "020"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
                                      "Experiments/lits/results/stage1"))
         ))
     
-    resunet_model_kwargs = OrderedDict((
+    model_kwargs = OrderedDict((
         ('input_shape', (1, 256, 256)),
         ('num_classes', 1),
-        ('input_num_filters', 32),
-        ('main_block_depth', 1),
-        ('num_main_blocks', 3),
         ('num_init_blocks', 2),
+        ('num_main_blocks', 3),
+        ('main_block_depth', 1),
+        ('input_num_filters', 32),
+        ('num_cycles', 3),
         ('weight_decay', 0.0005), 
         ('dropout', 0.05),
         ('batch_norm', True),
-        ('short_skip', True),
-        ('long_skip', True),
-        ('long_skip_merge_mode', 'sum'),
-        ('use_skip_blocks', False),
-        ('relative_num_across_filters', 1),
-        ('mainblock', basic_block),
+        ('mainblock', bottleneck),
         ('initblock', basic_block_mp),
+        ('cycles_share_weights', True)
         ))
     
     data_gen_kwargs = OrderedDict((
@@ -181,9 +178,9 @@ def main():
     train_kwargs = OrderedDict((
         # data
         ('num_classes', 1),
-        ('batch_size', 40),
-        ('val_batch_size', 200),
-        ('num_epochs', 250),
+        ('batch_size', 25),
+        ('val_batch_size', 125),
+        ('num_epochs', 500),
         ('max_patience', 50),
         ('samples_per_epoch', 1040),
         
@@ -216,7 +213,7 @@ def main():
     '''
     all_dicts = OrderedDict((
         ("General settings", general_settings),
-        ("ResUNet settings", resunet_model_kwargs),
+        ("Model settings", model_kwargs),
         ("Data generator settings", data_gen_kwargs),
         ("Data augmentation settings", data_augmentation_kwargs),
         ("Trainer settings", train_kwargs)
@@ -275,7 +272,7 @@ def main():
         print('\n > Building model...')
         # Increase the recursion limit to handle resnet skip connections
         sys.setrecursionlimit(99999)
-        model = assemble_model(**resunet_model_kwargs)
+        model = assemble_model(**model_kwargs)
         print("   number of parameters : ", model.count_params())
     
         '''
