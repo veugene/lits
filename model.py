@@ -4,8 +4,9 @@ from keras.layers import (Input,
                           Dense,
                           Permute,
                           Lambda,
-                          merge)
-from keras.layers.convolutional import Convolution2D
+                          merge,
+                          BatchNormalization,
+                          Convolution2D)
 from keras import backend as K
 from theano import tensor as T
 from keras.regularizers import l2
@@ -38,9 +39,9 @@ def _softmax(x):
 def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    main_block_depth, input_num_filters, num_cycles=1,
                    preprocessor_network=None, postprocessor_network=None,
-                   mainblock=None, initblock=None, firstblock=None,
-                   dropout=0., batch_norm=True, weight_decay=None,
-                   bn_kwargs=None, cycles_share_weights=True):
+                   mainblock=None, initblock=None, dropout=0., batch_norm=True,
+                   weight_decay=None, bn_kwargs=None,
+                   cycles_share_weights=True):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -62,7 +63,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         to the classifier.
     mainblock : a layer defining the mainblock (bottleneck by default).
     initblock : a layer defining the initblock (basic_block_mp by default).
-    firstblock : a layer defining the firstblock (basic_block_mp by default).
     use_skip_blocks : pass features skipped along long_skip through skipblocks.
     dropout : the dropout probability, introduced in every block.
     batch_norm : enable or disable batch normalization.
@@ -77,8 +77,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         mainblock = basic_block
     if initblock is None:
         initblock = basic_block_mp
-    if firstblock is None:
-        firstblock = basic_block_mp
     
     '''
     main_block_depth can be a list per block or a single value 
@@ -147,6 +145,8 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     block_kwargs = {'dropout': dropout,
                     'weight_decay': weight_decay,
                     'bn_kwargs': bn_kwargs}
+    if bn_kwargs is None:
+        bn_kwargs = {}
     
     # INPUT
     input = Input(shape=input_shape)
@@ -168,26 +168,22 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         blocks.append({'down': {}, 'up': {}, 'across': {}})
         skips.append({'down': {}, 'up': {}, 'across': {}})
         
-        # On the down path, batch norm is only used for the first down.
+        # On the down path, batch norm is only used for the first cycle.
         bn_down = batch_norm if cycle==0 else False
         
-        # First block
+        # First convolution
         if cycle > 0:
             x = merge_into(x, tensors[cycle-1]['up'][0], skips=skips,
                            cycle=cycle, direction='down', depth=0,
                            bn_status=bn_down)
         if cycles_share_weights and cycle > 1:
-            block = blocks[cycle-1]['down'][0]
+            conv = blocks[cycle-1]['down'][0]
         else:
-            block_func = firstblock(nb_filter=input_num_filters,
-                                    subsample=False,
-                                    upsample=False,
-                                    skip=False,
-                                    batch_norm=bn_down,
-                                    **block_kwargs)
-            block = make_block(block_func, x, cycle)
-        x = block(x)
-        blocks[cycle]['down'][0] = block
+            conv = Convolution2D(input_num_filters, 3, 3,
+                                 init='he_normal', border_mode='same',
+                                 W_regularizer=_l2(weight_decay))
+        x = conv(x)
+        blocks[cycle]['down'][0] = conv
         tensors[cycle]['down'][0] = x
         print("Cycle {} - FIRST DOWN: {}".format(cycle, x._keras_shape))
         
@@ -316,20 +312,21 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             print("Cycle {} - INIT UP {}: {}".format(cycle, b,
                                                      x._keras_shape))
             
-        # Final block
+        # Final convolution.
         x = merge_into(x, tensors[cycle]['down'][0], skips=skips,
                        cycle=cycle, direction='up', depth=0,
                        bn_status=bn_up)
         if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
             block = blocks[cycle-1]['up'][0]
         else:
-            block_func = firstblock(nb_filter=input_num_filters,
-                                    subsample=False,
-                                    upsample=False,
-                                    skip=False,
-                                    batch_norm=bn_up,
-                                    **block_kwargs)
-            block = make_block(block_func, x, cycle)
+            def final_block(x): 
+                out = Convolution2D(input_num_filters, 3, 3,
+                                      init='he_normal', border_mode='same',
+                                      W_regularizer=_l2(weight_decay))(x)
+                out = BatchNormalization(axis=1, **bn_kwargs)(out)
+                out = Activation('relu')(out)
+                return out
+            block = make_block(final_block, x, cycle)
         x = block(x)
         blocks[cycle]['up'][0] = block
         tensors[cycle]['up'][0] = x
