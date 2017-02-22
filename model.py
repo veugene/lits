@@ -39,8 +39,8 @@ def _softmax(x):
 def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    main_block_depth, input_num_filters, num_cycles=1,
                    preprocessor_network=None, postprocessor_network=None,
-                   mainblock=None, initblock=None, dropout=0., batch_norm=True,
-                   weight_decay=None, bn_kwargs=None,
+                   mainblock=None, initblock=None, num_residuals=1, dropout=0.,
+                   batch_norm=True, weight_decay=None, bn_kwargs=None,
                    cycles_share_weights=True):
     """
     input_shape : tuple specifiying the 2D image input shape.
@@ -63,7 +63,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         to the classifier.
     mainblock : a layer defining the mainblock (bottleneck by default).
     initblock : a layer defining the initblock (basic_block_mp by default).
-    use_skip_blocks : pass features skipped along long_skip through skipblocks.
+    num_residuals : the number of parallel residual functions per block.
     dropout : the dropout probability, introduced in every block.
     batch_norm : enable or disable batch normalization.
     weight_decay : the weight decay (L2 penalty) used in every convolution.
@@ -142,8 +142,10 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     '''
     Constant kwargs passed to the init and main blocks.
     '''
-    block_kwargs = {'dropout': dropout,
+    block_kwargs = {'skip': True,
+                    'dropout': dropout,
                     'weight_decay': weight_decay,
+                    'num_residuals': num_residuals,
                     'bn_kwargs': bn_kwargs}
     if bn_kwargs is None:
         bn_kwargs = {}
@@ -200,7 +202,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 block_func = residual_block(initblock,
                                             nb_filter=input_num_filters,
                                             repetitions=1,
-                                            skip=True,
                                             subsample=True,
                                             upsample=False,
                                             batch_norm=bn_down,
@@ -225,7 +226,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 block_func = residual_block(mainblock,
                                             nb_filter=input_num_filters*(2**b),
                                             repetitions=get_repetitions(b),
-                                            skip=True,
                                             subsample=True,
                                             upsample=False,
                                             batch_norm=bn_down,
@@ -249,7 +249,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                   mainblock,
                                   nb_filter=input_num_filters*(2**b),
                                   repetitions=get_repetitions(num_main_blocks),
-                                  skip=True,
                                   subsample=True,
                                   upsample=True,
                                   batch_norm=bn_down,
@@ -276,7 +275,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 block_func = residual_block(mainblock,
                                             nb_filter=input_num_filters*(2**b),
                                             repetitions=get_repetitions(b),
-                                            skip=True,
                                             subsample=False,
                                             upsample=True,
                                             batch_norm=bn_up,
@@ -300,7 +298,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 block_func = residual_block(initblock,
                                             nb_filter=input_num_filters,
                                             repetitions=1,
-                                            skip=True,
                                             subsample=False,
                                             upsample=True,
                                             batch_norm=bn_up,
