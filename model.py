@@ -5,7 +5,6 @@ from keras.layers import (Input,
                           Permute,
                           Lambda,
                           merge)
-from keras.layers.normalization import BatchNormalization
 from keras.layers.convolutional import Convolution2D
 from keras import backend as K
 from theano import tensor as T
@@ -41,7 +40,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    preprocessor_network=None, postprocessor_network=None,
                    mainblock=None, initblock=None, firstblock=None,
                    dropout=0., batch_norm=True, weight_decay=None,
-                   cycles_share_weights=True):
+                   bn_kwargs=None, cycles_share_weights=True):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -112,7 +111,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     
     If weight sharing is enabled, reuse old convolutions.
     '''
-    def merge_into(x, into, skips, cycle, direction, depth):
+    def merge_into(x, into, skips, cycle, direction, depth, bn_status):
         if x._keras_shape[1] != into._keras_shape[1]:
             if cycles_share_weights and depth in skips[cycle-1][direction]:
                 conv_layer = skips[cycle-1][direction][depth]
@@ -123,7 +122,12 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                            W_regularizer=_l2(weight_decay))
             skips[cycle][direction][depth] = conv_layer
             x = conv_layer(x)
+        
         out = merge([x, into], mode='sum')
+        if bn_status==False:
+            # When batch norm is disabled, halve the merged values since it is
+            # not a residual that is being summed in on a long skip connection.
+            out = Lambda(lambda x: x/2., output_shape=lambda x:x)(out)
         return out
         #return x
     
@@ -141,8 +145,8 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     Constant kwargs passed to the init and main blocks.
     '''
     block_kwargs = {'dropout': dropout,
-                    'batch_norm': batch_norm,
-                    'weight_decay': weight_decay}
+                    'weight_decay': weight_decay,
+                    'bn_kwargs': bn_kwargs}
     
     # INPUT
     input = Input(shape=input_shape)
@@ -164,17 +168,22 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         blocks.append({'down': {}, 'up': {}, 'across': {}})
         skips.append({'down': {}, 'up': {}, 'across': {}})
         
+        # On the down path, batch norm is only used for the first down.
+        bn_down = batch_norm if cycle==0 else False
+        
         # First block
         if cycle > 0:
             x = merge_into(x, tensors[cycle-1]['up'][0], skips=skips,
-                           cycle=cycle, direction='down', depth=0)
-        if cycles_share_weights and cycle > 0:
+                           cycle=cycle, direction='down', depth=0,
+                           bn_status=bn_down)
+        if cycles_share_weights and cycle > 1:
             block = blocks[cycle-1]['down'][0]
         else:
             block_func = firstblock(nb_filter=input_num_filters,
                                     subsample=False,
                                     upsample=False,
                                     skip=False,
+                                    batch_norm=bn_down,
                                     **block_kwargs)
             block = make_block(block_func, x, cycle)
         x = block(x)
@@ -187,8 +196,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             depth = b+1
             if cycle > 0:
                 x = merge_into(x, tensors[cycle-1]['up'][depth], skips=skips,
-                               cycle=cycle, direction='down', depth=depth)
-            if cycles_share_weights and cycle > 0:
+                               cycle=cycle, direction='down', depth=depth,
+                               bn_status=bn_down)
+            if cycles_share_weights and cycle > 1:
                 block = blocks[cycle-1]['down'][depth]
             else:
                 block_func = residual_block(initblock,
@@ -197,6 +207,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             skip=True,
                                             subsample=True,
                                             upsample=False,
+                                            batch_norm=bn_down,
                                             **block_kwargs)
                 block = make_block(block_func, x, cycle)
             x = block(x)
@@ -210,8 +221,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             depth = b+1+num_init_blocks
             if cycle > 0:
                 x = merge_into(x, tensors[cycle-1]['up'][depth], skips=skips,
-                               cycle=cycle, direction='down', depth=depth)
-            if cycles_share_weights and cycle > 0:
+                               cycle=cycle, direction='down', depth=depth,
+                               bn_status=bn_down)
+            if cycles_share_weights and cycle > 1:
                 block = blocks[cycle-1]['down'][depth]
             else:
                 block_func = residual_block(mainblock,
@@ -220,6 +232,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             skip=True,
                                             subsample=True,
                                             upsample=False,
+                                            batch_norm=bn_down,
                                             **block_kwargs)
                 block = make_block(block_func, x, cycle)
             x = block(x)
@@ -231,8 +244,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         # ACROSS
         if cycle > 0:
             x = merge_into(x, tensors[cycle-1]['across'][0], skips=skips,
-                           cycle=cycle, direction='across', depth=0)
-        if cycles_share_weights and cycle > 0:
+                           cycle=cycle, direction='across', depth=0,
+                           bn_status=bn_down)
+        if cycles_share_weights and cycle > 1:
             block = blocks[cycle-1]['across'][0]
         else:
             block_func = residual_block( \
@@ -242,6 +256,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                   skip=True,
                                   subsample=True,
                                   upsample=True,
+                                  batch_norm=bn_down,
                                   **block_kwargs)
             block = make_block(block_func, x, cycle)
         x = block(x)
@@ -249,20 +264,26 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         tensors[cycle]['across'][0] = x
         print("Cycle {} - ACROSS: {}".format(cycle, x._keras_shape))
 
+        # On the up path, batch norm only in the last cycle.
+        bn_up = batch_norm if cycle==num_cycles-1 else False
+
         # UP (resnet blocks)
         for b in range(num_main_blocks-1, -1, -1):
             depth = b+1+num_init_blocks
             x = merge_into(x, tensors[cycle]['down'][depth], skips=skips,
-                           cycle=cycle, direction='up', depth=depth)
-            if cycles_share_weights and cycle > 0:
+                           cycle=cycle, direction='up', depth=depth,
+                           bn_status=bn_up)
+            if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
                 block = blocks[cycle-1]['up'][depth]
             else:
+                
                 block_func = residual_block(mainblock,
                                             nb_filter=input_num_filters*(2**b),
                                             repetitions=get_repetitions(b),
                                             skip=True,
                                             subsample=False,
                                             upsample=True,
+                                            batch_norm=bn_up,
                                             **block_kwargs)
                 block = make_block(block_func, x, cycle)
             x = block(x)
@@ -275,8 +296,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         for b in range(num_init_blocks-1, -1, -1):
             depth = b+1
             x = merge_into(x, tensors[cycle]['down'][depth], skips=skips,
-                           cycle=cycle, direction='up', depth=depth)
-            if cycles_share_weights and cycle > 0:
+                           cycle=cycle, direction='up', depth=depth,
+                           bn_status=bn_up)
+            if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
                 block = blocks[cycle-1]['up'][depth]
             else:
                 block_func = residual_block(initblock,
@@ -285,6 +307,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             skip=True,
                                             subsample=False,
                                             upsample=True,
+                                            batch_norm=bn_up,
                                             **block_kwargs)
                 block = make_block(block_func, x, cycle)
             x = block(x)
@@ -295,19 +318,26 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             
         # Final block
         x = merge_into(x, tensors[cycle]['down'][0], skips=skips,
-                       cycle=cycle, direction='up', depth=0)
-        if cycles_share_weights and cycle > 0:
+                       cycle=cycle, direction='up', depth=0,
+                       bn_status=bn_up)
+        if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
             block = blocks[cycle-1]['up'][0]
         else:
             block_func = firstblock(nb_filter=input_num_filters,
                                     subsample=False,
                                     upsample=False,
                                     skip=False,
+                                    batch_norm=bn_up,
                                     **block_kwargs)
             block = make_block(block_func, x, cycle)
         x = block(x)
         blocks[cycle]['up'][0] = block
         tensors[cycle]['up'][0] = x
+        if cycle > 0:
+            # Merge preclassifier outputs across all cycles.
+            x = merge_into(x, tensors[cycle-1]['up'][0], skips=skips,
+                           cycle=cycle, direction='up', depth=-1,
+                           bn_status=bn_up)
         print("Cycle {} - FIRST UP: {}".format(cycle, x._keras_shape))
             
     # Postprocessing
