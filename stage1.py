@@ -14,7 +14,8 @@ import keras
 
 # Import in-house libraries
 from model import assemble_model
-from fcn_plusplus.lib.loss import masked_dice_loss
+from fcn_plusplus.lib.loss import (masked_dice_loss,
+                                   dice_loss)
 from fcn_plusplus.lib.logging import FileLogger
 from fcn_plusplus.lib.blocks import (bottleneck,
                                      basic_block,
@@ -28,10 +29,11 @@ def train(model, num_classes, batch_size, val_batch_size,
     
     ''' Accuracy metric '''
     def accuracy(y_true, y_pred):
+        y_true_ = K.clip(y_true-1, 0, 1)
         if num_classes==1:
-            return K.mean(K.equal(y_true, K.round(y_pred)))
+            return K.mean(K.equal(y_true_, K.round(y_pred)))
         else:
-            return K.mean(K.equal(K.squeeze(y_true, 1),
+            return K.mean(K.equal(K.squeeze(y_true_, 1),
                                   K.argmax(y_pred, axis=1)))
     
     '''
@@ -48,7 +50,7 @@ def train(model, num_classes, batch_size, val_batch_size,
     
     model.compile(loss=masked_dice_loss,
                   optimizer=optimizer,
-                  metrics=[accuracy, masked_dice_loss])
+                  metrics=[accuracy, masked_dice_loss, dice_loss(2)])
 
     '''
     Print model summary
@@ -125,7 +127,7 @@ def main():
     Configurable parameters
     '''
     general_settings = OrderedDict((
-        ('experiment_ID', "020"),
+        ('experiment_ID', "030"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
@@ -138,14 +140,15 @@ def main():
         ('num_init_blocks', 2),
         ('num_main_blocks', 3),
         ('main_block_depth', 1),
-        ('input_num_filters', 32),
-        ('num_cycles', 3),
+        ('input_num_filters', 16),
+        ('num_cycles', 1),
         ('weight_decay', 0.0005), 
         ('dropout', 0.05),
         ('batch_norm', True),
         ('mainblock', basic_block),
         ('initblock', basic_block_mp),
-        ('cycles_share_weights', False)
+        ('bn_kwargs', {'momentum': 0.9, 'mode': 0}),
+        ('cycles_share_weights', True)
         ))
     
     data_gen_kwargs = OrderedDict((
@@ -178,8 +181,8 @@ def main():
     train_kwargs = OrderedDict((
         # data
         ('num_classes', 1),
-        ('batch_size', 25),
-        ('val_batch_size', 125),
+        ('batch_size', 40),
+        ('val_batch_size', 200),
         ('num_epochs', 500),
         ('max_patience', 50),
         ('samples_per_epoch', 1040),
