@@ -129,7 +129,7 @@ def main():
     '''
     general_settings = OrderedDict((
         ('experiment_ID', "029"),
-        ('sub_ID', "05"),
+        ('sub_ID', "06"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
@@ -152,6 +152,9 @@ def main():
         ('bn_kwargs', {'momentum': 0.9, 'mode': 0}),
         ('cycles_share_weights', True),
         ('num_residuals', 2),
+        ('num_first_conv', 1),
+        ('num_final_conv', 1),
+        ('num_classifier', 1),
         ('init', 'zero')
         ))
 

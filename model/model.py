@@ -39,9 +39,11 @@ def _softmax(x):
 def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    main_block_depth, input_num_filters, num_cycles=1,
                    preprocessor_network=None, postprocessor_network=None,
-                   mainblock=None, initblock=None, num_residuals=1, dropout=0.,
+                   mainblock=None, initblock=None, dropout=0.,
                    batch_norm=True, weight_decay=None, bn_kwargs=None,
-                   init='he_normal', cycles_share_weights=True):
+                   init='he_normal', cycles_share_weights=True,
+                   num_residuals=1, num_first_conv=1, num_final_conv=1,
+                   num_classifier=1):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -63,11 +65,14 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         to the classifier.
     mainblock : a layer defining the mainblock (bottleneck by default).
     initblock : a layer defining the initblock (basic_block_mp by default).
-    num_residuals : the number of parallel residual functions per block.
     dropout : the dropout probability, introduced in every block.
     batch_norm : enable or disable batch normalization.
     weight_decay : the weight decay (L2 penalty) used in every convolution.
     cycles_share_weights : share network weights across cycles.
+    num_residuals : the number of parallel residual functions per block.
+    num_first_conv : the number of parallel first convolutions.
+    num_final_conv : the number of parallel final convolutions (+BN).
+    num_classifier : the number of parallel linear classifiers.
     """
     
     '''
@@ -186,7 +191,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         else:
             def first_block(x):
                 outputs = []
-                for i in range(num_residuals):
+                for i in range(num_first_conv):
                     out = Convolution2D(input_num_filters, 3, 3,
                                         init=init, border_mode='same',
                                         W_regularizer=_l2(weight_decay),
@@ -337,7 +342,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         else:
             def final_block(x):
                 outputs = []
-                for i in range(num_residuals):
+                for i in range(num_final_conv):
                     out = Convolution2D(input_num_filters, 3, 3,
                                         init=init, border_mode='same',
                                         W_regularizer=_l2(weight_decay),
@@ -370,7 +375,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     if num_classes is not None:
         # Linear classifier
         classifiers = []
-        for i in range(num_residuals):
+        for i in range(num_classifier):
             # Name shenanigans to support loading experiment 029.
             name = 'classifier_conv' if i==0 else 'classifier_conv_'+str(i)
             output = Convolution2D(num_classes,1,1,activation='linear', 
