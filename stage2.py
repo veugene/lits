@@ -129,7 +129,7 @@ def main():
     '''
     general_settings = OrderedDict((
         ('experiment_ID', "029"),
-        ('sub_ID', "03"),
+        ('sub_ID', "05"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
@@ -151,7 +151,8 @@ def main():
         ('initblock', basic_block_mp),
         ('bn_kwargs', {'momentum': 0.9, 'mode': 0}),
         ('cycles_share_weights', True),
-        ('num_residuals', 1)
+        ('num_residuals', 2),
+        ('init', 'zero')
         ))
 
     data_gen_kwargs = OrderedDict((
@@ -297,7 +298,7 @@ def main():
         load_path = os.path.join(general_settings['results_dir'], "stage1",
                                 general_settings['experiment_ID'],
                                 "best_weights_named.hdf5")
-        load_and_freeze_weights(model, load_path, freeze=False, verbose=True)
+        load_and_freeze_weights(model, load_path, freeze=True, verbose=True)
 
     '''
     Run experiment

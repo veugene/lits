@@ -41,7 +41,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    preprocessor_network=None, postprocessor_network=None,
                    mainblock=None, initblock=None, num_residuals=1, dropout=0.,
                    batch_norm=True, weight_decay=None, bn_kwargs=None,
-                   cycles_share_weights=True):
+                   init='he_normal', cycles_share_weights=True):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -116,7 +116,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             else:
                 name = 'long_skip_'+str(direction)+'_'+str(depth)
                 conv_layer = Convolution2D(into._keras_shape[1], 1, 1,
-                                           init='he_normal',
+                                           init=init,
                                            border_mode='valid',
                                            W_regularizer=_l2(weight_decay),
                                            name=name)
@@ -135,7 +135,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     Given some block function and an input tensor, return a reusable model
     instantiating that block function. This is to allow weight sharing.
     '''
-    def make_block(block_func, x, cycle=0):
+    def make_block(block_func, x):
         x_nb_filter = x._keras_shape[1]
         input = Input(shape=(x_nb_filter, None, None))
         model = Model(input, block_func(input))
@@ -148,7 +148,8 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     'dropout': dropout,
                     'weight_decay': weight_decay,
                     'num_residuals': num_residuals,
-                    'bn_kwargs': bn_kwargs}
+                    'bn_kwargs': bn_kwargs,
+                    'init': init}
     if bn_kwargs is None:
         bn_kwargs = {}
     
@@ -181,14 +182,24 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                            cycle=cycle, direction='down', depth=0,
                            bn_status=bn_down)
         if cycles_share_weights and cycle > 1:
-            conv = blocks[cycle-1]['down'][0]
+            block = blocks[cycle-1]['down'][0]
         else:
-            conv = Convolution2D(input_num_filters, 3, 3,
-                                 init='he_normal', border_mode='same',
-                                 W_regularizer=_l2(weight_decay),
-                                 name='first_conv_0')
-        x = conv(x)
-        blocks[cycle]['down'][0] = conv
+            def first_block(x):
+                outputs = []
+                for i in range(num_residuals):
+                    out = Convolution2D(input_num_filters, 3, 3,
+                                        init=init, border_mode='same',
+                                        W_regularizer=_l2(weight_decay),
+                                        name='first_conv_'+str(i))(x)
+                    outputs.append(out)
+                if len(outputs)>1:
+                    out = merge(outputs, mode='sum')
+                else:
+                    out = outputs[0]
+                return out
+            block = make_block(first_block, x)
+        x = block(x)
+        blocks[cycle]['down'][0] = block
         tensors[cycle]['down'][0] = x
         print("Cycle {} - FIRST DOWN: {}".format(cycle, x._keras_shape))
         
@@ -210,7 +221,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             batch_norm=bn_down,
                                             name='d'+str(depth),
                                             **block_kwargs)
-                block = make_block(block_func, x, cycle)
+                block = make_block(block_func, x)
             x = block(x)
             blocks[cycle]['down'][depth] = block
             tensors[cycle]['down'][depth] = x
@@ -235,7 +246,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             batch_norm=bn_down,
                                             name='d'+str(depth),
                                             **block_kwargs)
-                block = make_block(block_func, x, cycle)
+                block = make_block(block_func, x)
             x = block(x)
             blocks[cycle]['down'][depth] = block
             tensors[cycle]['down'][depth] = x
@@ -259,7 +270,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                   batch_norm=bn_down,
                                   name='a',
                                   **block_kwargs)
-            block = make_block(block_func, x, cycle)
+            block = make_block(block_func, x)
         x = block(x)
         blocks[cycle]['across'][0] = block
         tensors[cycle]['across'][0] = x
@@ -286,7 +297,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             batch_norm=bn_up,
                                             name='u'+str(depth),
                                             **block_kwargs)
-                block = make_block(block_func, x, cycle)
+                block = make_block(block_func, x)
             x = block(x)
             blocks[cycle]['up'][depth] = block
             tensors[cycle]['up'][depth] = x
@@ -310,7 +321,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             batch_norm=bn_up,
                                             name='u'+str(depth),
                                             **block_kwargs)
-                block = make_block(block_func, x, cycle)
+                block = make_block(block_func, x)
             x = block(x)
             blocks[cycle]['up'][depth] = block
             tensors[cycle]['up'][depth] = x
@@ -324,16 +335,23 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
             block = blocks[cycle-1]['up'][0]
         else:
-            def final_block(x): 
-                out = Convolution2D(input_num_filters, 3, 3,
-                                    init='he_normal', border_mode='same',
-                                    W_regularizer=_l2(weight_decay),
-                                    name='final_conv_1')(x)
-                out = BatchNormalization(axis=1, name='final_bn_1',
-                                         **bn_kwargs)(out)
-                out = Activation('relu')(out)
+            def final_block(x):
+                outputs = []
+                for i in range(num_residuals):
+                    out = Convolution2D(input_num_filters, 3, 3,
+                                        init=init, border_mode='same',
+                                        W_regularizer=_l2(weight_decay),
+                                        name='final_conv_'+str(i))(x)
+                    out = BatchNormalization(axis=1, name='final_bn_'+str(i),
+                                            **bn_kwargs)(out)
+                    out = Activation('relu')(out)
+                    outputs.append(out)
+                if len(outputs)>1:
+                    out = merge(outputs, mode='sum')
+                else:
+                    out = outputs[0]
                 return out
-            block = make_block(final_block, x, cycle)
+            block = make_block(final_block, x)
         x = block(x)
         blocks[cycle]['up'][0] = block
         tensors[cycle]['up'][0] = x
@@ -351,9 +369,18 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     # OUTPUT (SOFTMAX)
     if num_classes is not None:
         # Linear classifier
-        output = Convolution2D(num_classes,1,1,activation='linear', 
-                               W_regularizer=_l2(weight_decay),
-                               name='classifier_conv')(x)
+        classifiers = []
+        for i in range(num_residuals):
+            # Name shenanigans to support loading experiment 029.
+            name = 'classifier_conv' if i==0 else 'classifier_conv_'+str(i)
+            output = Convolution2D(num_classes,1,1,activation='linear', 
+                                   W_regularizer=_l2(weight_decay),
+                                   name=name)(x)
+            classifiers.append(output)
+        if len(classifiers)>1:
+            output = merge(classifiers, mode='sum')
+        else:
+            output = classifiers[0]
         output = Permute((2,3,1))(output)
         if num_classes==1:
             output = Activation('sigmoid', name='sigmoid')(output)
