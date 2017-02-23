@@ -4,6 +4,7 @@ import numpy as np
 import shutil
 import os
 import sys
+import h5py
 sys.path.append("../")
 
 # Import keras libraries
@@ -20,7 +21,8 @@ from model.blocks import (bottleneck,
 from fcn_plusplus.lib.loss import (masked_dice_loss,
                                    dice_loss)
 from fcn_plusplus.lib.logging import FileLogger
-from utils import data_generator
+from utils import (data_generator,
+                   load_and_freeze_weights)
 
 def train(model, num_classes, batch_size, val_batch_size, 
           num_epochs, samples_per_epoch, max_patience, optimizer,
@@ -29,11 +31,10 @@ def train(model, num_classes, batch_size, val_batch_size,
     
     ''' Accuracy metric '''
     def accuracy(y_true, y_pred):
-        y_true_ = K.clip(y_true-1, 0, 1)
         if num_classes==1:
-            return K.mean(K.equal(y_true_, K.round(y_pred)))
+            return K.mean(K.equal(y_true, K.round(y_pred)))
         else:
-            return K.mean(K.equal(K.squeeze(y_true_, 1),
+            return K.mean(K.equal(K.squeeze(y_true, 1),
                                   K.argmax(y_pred, axis=1)))
     
     '''
@@ -48,9 +49,9 @@ def train(model, num_classes, batch_size, val_batch_size,
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     
-    model.compile(loss=masked_dice_loss,
+    model.compile(loss=dice_loss(2),
                   optimizer=optimizer,
-                  metrics=[accuracy, masked_dice_loss, dice_loss(2)])
+                  metrics=[accuracy, dice_loss(2), masked_dice_loss])
 
     '''
     Print model summary
@@ -91,7 +92,7 @@ def train(model, num_classes, batch_size, val_batch_size,
     checkpointer_best = ModelCheckpoint(filepath=os.path.join(save_path,
                                                           "best_weights.hdf5"),
                                         verbose=1,
-                                        monitor='val_masked_dice_loss',
+                                        monitor='val_dice',
                                         mode='min',
                                         save_best_only=True,
                                         save_weights_only=False)
@@ -127,31 +128,32 @@ def main():
     Configurable parameters
     '''
     general_settings = OrderedDict((
-        ('experiment_ID', "debug"),
+        ('experiment_ID', "029"),
+        ('sub_ID', "03"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
-                                     "Experiments/lits/results/stage1"))
+                                     "Experiments/lits/results"))
         ))
-    
+
     model_kwargs = OrderedDict((
         ('input_shape', (1, 256, 256)),
         ('num_classes', 1),
         ('num_init_blocks', 2),
         ('num_main_blocks', 3),
         ('main_block_depth', 1),
-        ('input_num_filters', 16),
+        ('input_num_filters', 32),
         ('num_cycles', 1),
-        ('num_residuals', 1),
         ('weight_decay', 0.0005), 
         ('dropout', 0.05),
         ('batch_norm', True),
         ('mainblock', basic_block),
         ('initblock', basic_block_mp),
         ('bn_kwargs', {'momentum': 0.9, 'mode': 0}),
-        ('cycles_share_weights', True)
+        ('cycles_share_weights', True),
+        ('num_residuals', 1)
         ))
-    
+
     data_gen_kwargs = OrderedDict((
         ('data_path', os.path.join("/export/projects/Candela/datasets/",
                                    "by_project/lits/data_2.zarr")),
@@ -159,7 +161,7 @@ def main():
         ('nb_proc_workers', 4),
         ('downscale', True)
         ))
-    
+
     data_augmentation_kwargs = OrderedDict((
         ('rotation_range', 15),
         ('width_shift_range', 0.1),
@@ -178,7 +180,7 @@ def main():
         ('warp_grid_size', 3),
         ('crop_size', None)
         ))
-    
+
     train_kwargs = OrderedDict((
         # data
         ('num_classes', 1),
@@ -195,10 +197,10 @@ def main():
         # other
         ('show_model', False),
         ))
-    
+
     # Set random seed
     np.random.seed(general_settings['random_seed'])
-    
+
     # Split data into train, validation
     num_volumes = 130
     #shuffled_indices = np.random.permutation(num_volumes)
@@ -211,7 +213,7 @@ def main():
         ('valid', shuffled_indices[num_train:])
         ))
     train_kwargs.update({'volume_indices': volume_indices})
-    
+
     '''
     Print settings to screen
     '''
@@ -222,19 +224,19 @@ def main():
         ("Data augmentation settings", data_augmentation_kwargs),
         ("Trainer settings", train_kwargs)
         ))
-    print("Experiment:", general_settings['experiment_ID'])
+    exp = general_settings['experiment_ID']+"_"+general_settings['sub_ID']
+    print("Experiment:", exp)
     print("")
     for name, d in all_dicts.items():
         print("#### {} ####".format(name))
         for key in d.keys():
             print(key, ":", d[key])
         print("")  
-    
+
     '''
     Set up experiment directory
     '''
-    experiment_dir = os.path.join(general_settings['results_dir'],
-                                  general_settings['experiment_ID'])
+    experiment_dir = os.path.join(general_settings['results_dir'],"stage2",exp)
     model = None
     if os.path.exists(experiment_dir):
         print("")
@@ -242,11 +244,11 @@ def main():
         write_into = None
         while write_into not in ['y', 'n', 'r', 'c', '']:
             write_into = str.lower(input( \
-                         "Write into existing directory?\n"
-                         "    y : yes\n"
-                         "    n : no (default)\n"
-                         "    r : delete and replace directory\n"
-                         "    c : continue/resume training\n"))
+                            "Write into existing directory?\n"
+                            "    y : yes\n"
+                            "    n : no (default)\n"
+                            "    r : delete and replace directory\n"
+                            "    c : continue/resume training\n"))
         if write_into in ['n', '']:
             print("Aborted")
             sys.exit()
@@ -257,7 +259,8 @@ def main():
             print("Attempting to load model state and continue training.")
             model = keras.models.load_model( \
                 os.path.join(experiment_dir, "weights.hdf5"),
-                custom_objects={'masked_dice_loss': masked_dice_loss})
+                custom_objects={'masked_dice_loss': masked_dice_loss,
+                                'dice': dice_loss(2)})
         print("")
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
@@ -268,7 +271,7 @@ def main():
     '''
     fn = sys.argv[0].rsplit('/', 1)[-1]
     shutil.copy(sys.argv[0], os.path.join(experiment_dir, fn))
-    
+
     '''
     Assemble model
     '''
@@ -278,15 +281,24 @@ def main():
         sys.setrecursionlimit(99999)
         model = assemble_model(**model_kwargs)
         print("   number of parameters : ", model.count_params())
-    
+
         '''
         Save the model in yaml form
         '''
         yaml_string = model.to_yaml()
         open(os.path.join(experiment_dir, "model_" +
-                          str(general_settings['experiment_ID']) +
-                          ".yaml"), 'w').write(yaml_string)
-    
+                          str(exp)+".yaml"), 'w').write(yaml_string)
+        
+        '''
+        Load stage1 model weights and freeze stage1 weights, except classifier.
+        NOTE: this means that skip connection weights are frozen too -- these
+        will be adjusted later when all weights are unfrozen and fine-tuned.
+        '''
+        load_path = os.path.join(general_settings['results_dir'], "stage1",
+                                general_settings['experiment_ID'],
+                                "best_weights_named.hdf5")
+        load_and_freeze_weights(model, load_path, freeze=False, verbose=True)
+
     '''
     Run experiment
     '''
@@ -295,7 +307,7 @@ def main():
           data_gen_kwargs=data_gen_kwargs,
           data_augmentation_kwargs=data_augmentation_kwargs,
           **train_kwargs)
-    
+        
 
 if __name__ == "__main__":
     main()
