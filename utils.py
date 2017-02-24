@@ -1,9 +1,12 @@
 import zarr
+import h5py
 from skimage import transform
 import numpy as np
 from data_tools.data_augmentation import random_transform
 from data_tools.io import data_flow
 from data_tools.wrap import multi_source_array
+from keras import backend as K
+
 
 def resize_stack(arr, size, interp='bilinear'):
     out = np.zeros((len(arr),)+tuple(size), arr.dtype)
@@ -69,3 +72,54 @@ def data_generator(data_path, volume_indices, batch_size,
                          rng=rng)
     
     return data_gen
+
+
+def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
+                            layers_to_not_freeze=None):
+    f = h5py.File(load_path, mode='r')
+    if 'layer_names' not in f.attrs and 'model_weights' in f:
+        f = f['model_weights']
+    layer_names = [n.decode('utf8') for n in f.attrs['layer_names']]
+    weights_dict = dict(((w.name, w) for w in model.weights))
+    for name in layer_names:
+        g = f[name]
+        weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
+        for wname in weight_names:
+            if wname in weights_dict:
+                if verbose:
+                    print("Setting weights {}".format(wname))
+                weights_dict[wname].set_value(g[wname][...])
+    
+    if freeze:
+        layers_to_freeze = []
+        if layers_to_not_freeze is None:
+            layers_to_not_freeze = []
+        param_names = ["_W", "_b", "_gamma", "_beta",
+                       "_running_mean", "_running_std"]
+        for name in layer_names:
+            g = f[name]
+            weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
+            for wname in weight_names:
+                for pname in param_names:
+                    if wname.endswith(pname):
+                        layers_to_freeze.append(wname[:-len(pname)])
+        
+        def find_layer_in_model(name, model):
+            for layer in model.layers:
+                if layer.name==name:
+                    return layer
+                elif layer.__class__.__name__ == 'Model':
+                    layer = find_layer_in_model(name, layer)
+                    if layer:
+                        return layer
+            return None
+        
+        for lname in sorted(set(layers_to_freeze)):
+            if lname in layers_to_not_freeze:
+                continue
+            layer = find_layer_in_model(lname, model)
+            if layer:
+                if verbose:
+                    print("Freezing layer {}".format(lname))
+                layer.trainable = False
+        
