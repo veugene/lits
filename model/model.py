@@ -376,11 +376,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         # Linear classifier
         classifiers = []
         for i in range(num_classifier):
-            # Name shenanigans to support loading experiment 029.
-            name = 'classifier_conv' if i==0 else 'classifier_conv_'+str(i)
             output = Convolution2D(num_classes,1,1,activation='linear', 
                                    W_regularizer=_l2(weight_decay),
-                                   name=name)(x)
+                                   name='classifier_conv_'+str(i))(x)
             classifiers.append(output)
         if len(classifiers)>1:
             output = merge(classifiers, mode='sum')
