@@ -4,15 +4,20 @@ import numpy as np
 import shutil
 import os
 import sys
+import h5py
 sys.path.append("../")
 
 # Import keras libraries
 from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.optimizers import RMSprop
+from keras.optimizers import (RMSprop,
+                              nadam,
+                              adam,
+                              SGD)
 from keras import backend as K
 import keras
 
 # Import in-house libraries
+from callbacks import FullDice
 from model.model import assemble_model
 from model.blocks import (bottleneck,
                           basic_block,
@@ -20,21 +25,78 @@ from model.blocks import (bottleneck,
 from fcn_plusplus.lib.loss import (masked_dice_loss,
                                    dice_loss)
 from fcn_plusplus.lib.logging import FileLogger
-from utils import data_generator
+from utils import (data_generator,
+                   load_and_freeze_weights)
 
-def train(model, num_classes, batch_size, val_batch_size, 
-          num_epochs, samples_per_epoch, max_patience, optimizer,
-          save_path, volume_indices, data_gen_kwargs,
+def train(model, num_classes, batch_size, val_batch_size, num_epochs,
+          max_patience, optimizer, save_path, volume_indices, data_gen_kwargs,
           data_augmentation_kwargs={}, learning_rate=0.001, show_model=True):
     
-    ''' Accuracy metric '''
+    '''
+    Metrics
+    '''
+    metrics = []
+    
+    # Accuracy
     def accuracy(y_true, y_pred):
         y_true_ = K.clip(y_true-1, 0, 1)
         if num_classes==1:
-            return K.mean(K.equal(y_true_, K.round(y_pred)))
+            return K.mean(K.equal(y_true, K.round(y_pred)))
         else:
-            return K.mean(K.equal(K.squeeze(y_true_, 1),
+            return K.mean(K.equal(K.squeeze(y_true, 1),
                                   K.argmax(y_pred, axis=1)))
+    metrics.append(accuracy)
+        
+    # Dice averaged over slices.
+    metrics.append(dice_loss(2))
+    metrics.append(masked_dice_loss)
+
+    '''
+    Callbacks
+    '''
+    callbacks = []
+    
+    ## Define early stopping callback
+    #early_stopping = EarlyStopping(monitor='val_acc', mode='max',
+                                   #patience=max_patience, verbose=0)
+    #callbacks.append(early_stopping)
+    
+    # Compute dice on the full data
+    full_dice = FullDice()
+    callbacks.append(full_dice)
+    metrics.append(FullDice.get_metrics(target_class=2))
+    
+
+    # Define model saving callback
+    checkpointer_best_fdice = ModelCheckpoint(filepath=os.path.join(save_path,
+                                                    "best_weights_fdice.hdf5"),
+                                        verbose=1,
+                                        monitor='val_fdice',
+                                        mode='max',
+                                        save_best_only=True,
+                                        save_weights_only=False)
+    checkpointer_best_dice = ModelCheckpoint(filepath=os.path.join(save_path,
+                                                    "best_weights_dice.hdf5"),
+                                        verbose=1,
+                                        monitor='val_dice',
+                                        mode='min',
+                                        save_best_only=True,
+                                        save_weights_only=False)
+    callbacks.append(checkpointer_best_fdice)
+    callbacks.append(checkpointer_best_dice)
+    
+    # Save every last epoch
+    checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
+                                                              "weights.hdf5"),
+                                        verbose=0,
+                                        save_best_only=False,
+                                        save_weights_only=False)
+    callbacks.append(checkpointer_last)
+    
+    # File logging
+    logger = FileLogger(log_file_path=os.path.join(save_path,  
+                                                   "training_log.txt"))
+    callbacks.append(logger)
     
     '''
     Compile model
@@ -44,13 +106,32 @@ def train(model, num_classes, batch_size, val_batch_size,
         optimizer = RMSprop(lr=learning_rate,
                             rho=0.9,
                             epsilon=1e-8,
+                            decay=0.,
                             clipnorm=10)
+    elif optimizer=='nadam':
+        optimizer = nadam(lr=learning_rate,
+                          beta_1=0.9,
+                          beta_2=0.999,
+                          epsilon=1e-08,
+                          schedule_decay=0,
+                          clipnorm=10)
+    elif optimizer=='adam':
+        optimizer = adam(lr=learning_rate,
+                         beta_1=0.9,
+                         beta_2=0.999,
+                         epsilon=1e-08,
+                         decay=0,
+                         clipnorm=10)
+    elif optimizer=='sgd':
+        optimizer = SGD(lr=learning_rate,
+                        momentum=0.9,
+                        decay=0.,
+                        nesterov=True,
+                        clipnorm=10)
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
-    
-    model.compile(loss=masked_dice_loss,
-                  optimizer=optimizer,
-                  metrics=[accuracy, masked_dice_loss, dice_loss(2)])
+    if not hasattr(model, 'optimizer'):
+        model.compile(loss=dice_loss(2), optimizer=optimizer, metrics=metrics)
 
     '''
     Print model summary
@@ -76,82 +157,53 @@ def train(model, num_classes, batch_size, val_batch_size,
                                loop_forever=True,
                                transform_kwargs=None,
                                **data_gen_kwargs)
-
-    '''
-    Callbacks
-    '''
-    callbacks = []
-    
-    ## Define early stopping callback
-    #early_stopping = EarlyStopping(monitor='val_acc', mode='max',
-                                   #patience=max_patience, verbose=0)
-    #callbacks.append(early_stopping)
-
-    # Define model saving callback
-    checkpointer_best = ModelCheckpoint(filepath=os.path.join(save_path,
-                                                          "best_weights.hdf5"),
-                                        verbose=1,
-                                        monitor='val_masked_dice_loss',
-                                        mode='min',
-                                        save_best_only=True,
-                                        save_weights_only=False)
-    callbacks.append(checkpointer_best)
-    
-    # Save every last epoch
-    checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
-                                                              "weights.hdf5"),
-                                        verbose=0,
-                                        save_best_only=False,
-                                        save_weights_only=False)
-    callbacks.append(checkpointer_last)
-    
-    # File logging
-    logger = FileLogger(log_file_path=os.path.join(save_path,  
-                                                   "training_log.txt"))
-    callbacks.append(logger)
     
     '''
     Train the model
     '''
     print(' > Training the model...')
     history = model.fit_generator(generator=gen_train.flow(), 
-                                  samples_per_epoch=samples_per_epoch,
+                                  samples_per_epoch=gen_train.num_samples,
                                   nb_epoch=num_epochs,
                                   validation_data=gen_valid.flow(),
                                   nb_val_samples=gen_valid.num_samples,
                                   callbacks=callbacks)
-                                  
+    
 
 def main():
     '''
     Configurable parameters
     '''
     general_settings = OrderedDict((
-        ('experiment_ID', "debug"),
+        ('experiment_ID', "031f"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
-                                     "Experiments/lits/results/stage1"))
+                                     "Experiments/lits/results")),
         ))
-    
+
     model_kwargs = OrderedDict((
         ('input_shape', (1, 256, 256)),
         ('num_classes', 1),
         ('num_init_blocks', 2),
         ('num_main_blocks', 3),
         ('main_block_depth', 1),
-        ('input_num_filters', 16),
+        ('input_num_filters', 32),
         ('num_cycles', 1),
-        ('num_residuals', 1),
         ('weight_decay', 0.0005), 
         ('dropout', 0.05),
         ('batch_norm', True),
         ('mainblock', basic_block),
         ('initblock', basic_block_mp),
         ('bn_kwargs', {'momentum': 0.9, 'mode': 0}),
-        ('cycles_share_weights', True)
+        ('cycles_share_weights', True),
+        ('num_residuals', 2),
+        ('num_first_conv', 1),
+        ('num_final_conv', 1),
+        ('num_classifier', 1),
+        ('init', 'he_normal')
         ))
-    
+
     data_gen_kwargs = OrderedDict((
         ('data_path', os.path.join("/export/projects/Candela/datasets/",
                                    "by_project/lits/data_2.zarr")),
@@ -159,7 +211,7 @@ def main():
         ('nb_proc_workers', 4),
         ('downscale', True)
         ))
-    
+
     data_augmentation_kwargs = OrderedDict((
         ('rotation_range', 15),
         ('width_shift_range', 0.1),
@@ -178,7 +230,7 @@ def main():
         ('warp_grid_size', 3),
         ('crop_size', None)
         ))
-    
+
     train_kwargs = OrderedDict((
         # data
         ('num_classes', 1),
@@ -186,19 +238,18 @@ def main():
         ('val_batch_size', 200),
         ('num_epochs', 500),
         ('max_patience', 50),
-        ('samples_per_epoch', 1040),
         
         # optimizer
-        ('optimizer', 'RMSprop'),   # options: 'RMSprop'
+        ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
         ('learning_rate', 0.001),
         
         # other
         ('show_model', False),
         ))
-    
+
     # Set random seed
     np.random.seed(general_settings['random_seed'])
-    
+
     # Split data into train, validation
     num_volumes = 130
     #shuffled_indices = np.random.permutation(num_volumes)
@@ -211,7 +262,7 @@ def main():
         ('valid', shuffled_indices[num_train:])
         ))
     train_kwargs.update({'volume_indices': volume_indices})
-    
+
     '''
     Print settings to screen
     '''
@@ -222,19 +273,19 @@ def main():
         ("Data augmentation settings", data_augmentation_kwargs),
         ("Trainer settings", train_kwargs)
         ))
-    print("Experiment:", general_settings['experiment_ID'])
+    exp = general_settings['experiment_ID']+"_"+general_settings['sub_ID']
+    print("Experiment:", exp)
     print("")
     for name, d in all_dicts.items():
         print("#### {} ####".format(name))
         for key in d.keys():
             print(key, ":", d[key])
         print("")  
-    
+
     '''
     Set up experiment directory
     '''
-    experiment_dir = os.path.join(general_settings['results_dir'],
-                                  general_settings['experiment_ID'])
+    experiment_dir = os.path.join(general_settings['results_dir'],"stage2",exp)
     model = None
     if os.path.exists(experiment_dir):
         print("")
@@ -242,11 +293,11 @@ def main():
         write_into = None
         while write_into not in ['y', 'n', 'r', 'c', '']:
             write_into = str.lower(input( \
-                         "Write into existing directory?\n"
-                         "    y : yes\n"
-                         "    n : no (default)\n"
-                         "    r : delete and replace directory\n"
-                         "    c : continue/resume training\n"))
+                            "Write into existing directory?\n"
+                            "    y : yes\n"
+                            "    n : no (default)\n"
+                            "    r : delete and replace directory\n"
+                            "    c : continue/resume training\n"))
         if write_into in ['n', '']:
             print("Aborted")
             sys.exit()
@@ -257,7 +308,8 @@ def main():
             print("Attempting to load model state and continue training.")
             model = keras.models.load_model( \
                 os.path.join(experiment_dir, "weights.hdf5"),
-                custom_objects={'masked_dice_loss': masked_dice_loss})
+                custom_objects={'masked_dice_loss': masked_dice_loss,
+                                'dice': dice_loss(2)})
         print("")
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
@@ -268,7 +320,7 @@ def main():
     '''
     fn = sys.argv[0].rsplit('/', 1)[-1]
     shutil.copy(sys.argv[0], os.path.join(experiment_dir, fn))
-    
+
     '''
     Assemble model
     '''
@@ -278,15 +330,14 @@ def main():
         sys.setrecursionlimit(99999)
         model = assemble_model(**model_kwargs)
         print("   number of parameters : ", model.count_params())
-    
+
         '''
         Save the model in yaml form
         '''
         yaml_string = model.to_yaml()
         open(os.path.join(experiment_dir, "model_" +
-                          str(general_settings['experiment_ID']) +
-                          ".yaml"), 'w').write(yaml_string)
-    
+                          str(exp)+".yaml"), 'w').write(yaml_string)
+
     '''
     Run experiment
     '''
@@ -295,7 +346,7 @@ def main():
           data_gen_kwargs=data_gen_kwargs,
           data_augmentation_kwargs=data_augmentation_kwargs,
           **train_kwargs)
-    
+        
 
 if __name__ == "__main__":
     main()
