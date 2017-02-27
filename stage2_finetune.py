@@ -21,8 +21,7 @@ from model.blocks import (bottleneck,
 from fcn_plusplus.lib.loss import (masked_dice_loss,
                                    dice_loss)
 from fcn_plusplus.lib.logging import FileLogger
-from utils import (data_generator,
-                   load_and_freeze_weights)
+from utils import data_generator
 
 def train(model, num_classes, batch_size, val_batch_size, 
           num_epochs, samples_per_epoch, max_patience, optimizer,
@@ -31,6 +30,7 @@ def train(model, num_classes, batch_size, val_batch_size,
     
     ''' Accuracy metric '''
     def accuracy(y_true, y_pred):
+        y_true_ = K.clip(y_true-1, 0, 1)
         if num_classes==1:
             return K.mean(K.equal(y_true, K.round(y_pred)))
         else:
@@ -128,40 +128,11 @@ def main():
     Configurable parameters
     '''
     general_settings = OrderedDict((
-        ('experiment_ID', "029"),
-        ('sub_ID', "09"),
+        ('experiment_ID', "029_01"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
                                      "Experiments/lits/results")),
-        ('layers_to_not_freeze', ["first_conv_0",
-                                  "final_conv_0",
-                                  "final_bn_0",
-                                  "classifier_conv_0"]),
-        #('layers_to_not_freeze', None),
-        ('freeze', True)
-        ))
-
-    model_kwargs = OrderedDict((
-        ('input_shape', (1, 256, 256)),
-        ('num_classes', 1),
-        ('num_init_blocks', 2),
-        ('num_main_blocks', 3),
-        ('main_block_depth', 1),
-        ('input_num_filters', 32),
-        ('num_cycles', 1),
-        ('weight_decay', 0.0005), 
-        ('dropout', 0.05),
-        ('batch_norm', True),
-        ('mainblock', basic_block),
-        ('initblock', basic_block_mp),
-        ('bn_kwargs', {'momentum': 0.9, 'mode': 0}),
-        ('cycles_share_weights', True),
-        ('num_residuals', 2),
-        ('num_first_conv', 1),
-        ('num_final_conv', 1),
-        ('num_classifier', 1),
-        ('init', 'he_normal')
         ))
 
     data_gen_kwargs = OrderedDict((
@@ -202,7 +173,7 @@ def main():
         
         # optimizer
         ('optimizer', 'RMSprop'),   # options: 'RMSprop'
-        ('learning_rate', 0.001),
+        ('learning_rate', 0.0001),
         
         # other
         ('show_model', False),
@@ -229,12 +200,11 @@ def main():
     '''
     all_dicts = OrderedDict((
         ("General settings", general_settings),
-        ("Model settings", model_kwargs),
         ("Data generator settings", data_gen_kwargs),
         ("Data augmentation settings", data_augmentation_kwargs),
         ("Trainer settings", train_kwargs)
         ))
-    exp = general_settings['experiment_ID']+"_"+general_settings['sub_ID']
+    exp = general_settings['experiment_ID']+"f"
     print("Experiment:", exp)
     print("")
     for name, d in all_dicts.items():
@@ -286,31 +256,22 @@ def main():
     Assemble model
     '''
     if model is None:
-        print('\n > Building model...')
-        # Increase the recursion limit to handle resnet skip connections
-        sys.setrecursionlimit(99999)
-        model = assemble_model(**model_kwargs)
-        print("   number of parameters : ", model.count_params())
+        '''
+        Load model weights and unfreeze all layers.
+        '''
+        load_path = os.path.join(general_settings['results_dir'], "stage2",
+                                 general_settings['experiment_ID'],
+                                 "best_weights.hdf5")
+        model = keras.models.load_model(load_path,
+                    custom_objects={'masked_dice_loss': masked_dice_loss,
+                                    'dice': dice_loss(2)})
+        def unfreeze_layers(layers):
+            for l in layers:
+                if hasattr(l, 'layers') and l.layers is not None:
+                    unfreeze_layers(l.layers)
+                l.trainable = True
+        unfreeze_layers(model.layers)
 
-        '''
-        Save the model in yaml form
-        '''
-        yaml_string = model.to_yaml()
-        open(os.path.join(experiment_dir, "model_" +
-                          str(exp)+".yaml"), 'w').write(yaml_string)
-        
-        '''
-        Load stage1 model weights and freeze stage1 weights, except classifier.
-        NOTE: this means that skip connection weights are frozen too -- these
-        will be adjusted later when all weights are unfrozen and fine-tuned.
-        '''
-        load_path = os.path.join(general_settings['results_dir'], "stage1",
-                                general_settings['experiment_ID'],
-                                "best_weights_named.hdf5")
-        load_and_freeze_weights(model, load_path,
-                 freeze=general_settings['freeze'],
-                 layers_to_not_freeze=general_settings['layers_to_not_freeze'],
-                 verbose=True)
 
     '''
     Run experiment
