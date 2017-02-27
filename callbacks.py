@@ -48,8 +48,6 @@ class FullDice(Callback):
         
     def on_batch_end(self, batch, logs=None):
         logs = logs or {}
-        print("DEBUG: ", logs['d_I'], logs['d_A'], logs['d_B'],
-              logs['dice'], logs['masked_dice_loss'])
         
         # Record d_I, d_A, d_B
         for k in self.totals.keys():
@@ -73,6 +71,7 @@ class FullDice(Callback):
         for k in self.totals.keys():
             logs.pop(k)
         self.dice = {'fdice': dice}
+        
         
     def on_epoch_end(self, epoch, logs=None):
         # Update logs; if validation values exist, compute validation dice.
