@@ -9,11 +9,15 @@ sys.path.append("../")
 
 # Import keras libraries
 from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.optimizers import RMSprop
+from keras.optimizers import (RMSprop,
+                              nadam,
+                              adam,
+                              SGD)
 from keras import backend as K
 import keras
 
 # Import in-house libraries
+from callbacks import FullDice
 from model.model import assemble_model
 from model.blocks import (bottleneck,
                           basic_block,
@@ -24,18 +28,67 @@ from fcn_plusplus.lib.logging import FileLogger
 from utils import (data_generator,
                    load_and_freeze_weights)
 
-def train(model, num_classes, batch_size, val_batch_size, 
-          num_epochs, samples_per_epoch, max_patience, optimizer,
-          save_path, volume_indices, data_gen_kwargs,
+def train(model, num_classes, batch_size, val_batch_size, num_epochs,
+          max_patience, optimizer, save_path, volume_indices, data_gen_kwargs,
           data_augmentation_kwargs={}, learning_rate=0.001, show_model=True):
     
-    ''' Accuracy metric '''
+    '''
+    Metrics
+    '''
+    metrics = []
+    
+    # Accuracy
     def accuracy(y_true, y_pred):
+        y_true_ = K.clip(y_true-1, 0, 1)
         if num_classes==1:
             return K.mean(K.equal(y_true, K.round(y_pred)))
         else:
             return K.mean(K.equal(K.squeeze(y_true, 1),
                                   K.argmax(y_pred, axis=1)))
+    metrics.append(accuracy)
+        
+    # Dice averaged over slices.
+    metrics.append(dice_loss(2))
+    metrics.append(masked_dice_loss)
+
+    '''
+    Callbacks
+    '''
+    callbacks = []
+    
+    ## Define early stopping callback
+    #early_stopping = EarlyStopping(monitor='val_acc', mode='max',
+                                   #patience=max_patience, verbose=0)
+    #callbacks.append(early_stopping)
+    
+    # Compute dice on the full data
+    full_dice = FullDice()
+    callbacks.append(full_dice)
+    metrics.append(FullDice.get_metrics(target_class=2))
+    
+
+    # Define model saving callback
+    checkpointer_best = ModelCheckpoint(filepath=os.path.join(save_path,
+                                                          "best_weights.hdf5"),
+                                        verbose=1,
+                                        monitor='val_fdice',
+                                        mode='max',
+                                        save_best_only=True,
+                                        save_weights_only=False)
+    callbacks.append(checkpointer_best)
+    
+    # Save every last epoch
+    checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
+                                                              "weights.hdf5"),
+                                        verbose=0,
+                                        save_best_only=False,
+                                        save_weights_only=False)
+    callbacks.append(checkpointer_last)
+    
+    # File logging
+    logger = FileLogger(log_file_path=os.path.join(save_path,  
+                                                   "training_log.txt"))
+    callbacks.append(logger)
     
     '''
     Compile model
@@ -45,13 +98,32 @@ def train(model, num_classes, batch_size, val_batch_size,
         optimizer = RMSprop(lr=learning_rate,
                             rho=0.9,
                             epsilon=1e-8,
+                            decay=0.,
                             clipnorm=10)
+    elif optimizer=='nadam':
+        optimizer = nadam(lr=learning_rate,
+                          beta_1=0.9,
+                          beta_2=0.999,
+                          epsilon=1e-08,
+                          schedule_decay=0,
+                          clipnorm=10)
+    elif optimizer=='adam':
+        optimizer = adam(lr=learning_rate,
+                         beta_1=0.9,
+                         beta_2=0.999,
+                         epsilon=1e-08,
+                         decay=0,
+                         clipnorm=10)
+    elif optimizer=='sgd':
+        optimizer = SGD(lr=learning_rate,
+                        momentum=0.9,
+                        decay=0.,
+                        nesterov=True,
+                        clipnorm=10)
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
-    
-    model.compile(loss=dice_loss(2),
-                  optimizer=optimizer,
-                  metrics=[accuracy, dice_loss(2), masked_dice_loss])
+    if not hasattr(model, 'optimizer'):
+        model.compile(loss=dice_loss(2), optimizer=optimizer, metrics=metrics)
 
     '''
     Print model summary
@@ -77,68 +149,38 @@ def train(model, num_classes, batch_size, val_batch_size,
                                loop_forever=True,
                                transform_kwargs=None,
                                **data_gen_kwargs)
-
-    '''
-    Callbacks
-    '''
-    callbacks = []
-    
-    ## Define early stopping callback
-    #early_stopping = EarlyStopping(monitor='val_acc', mode='max',
-                                   #patience=max_patience, verbose=0)
-    #callbacks.append(early_stopping)
-
-    # Define model saving callback
-    checkpointer_best = ModelCheckpoint(filepath=os.path.join(save_path,
-                                                          "best_weights.hdf5"),
-                                        verbose=1,
-                                        monitor='val_dice',
-                                        mode='min',
-                                        save_best_only=True,
-                                        save_weights_only=False)
-    callbacks.append(checkpointer_best)
-    
-    # Save every last epoch
-    checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
-                                                              "weights.hdf5"),
-                                        verbose=0,
-                                        save_best_only=False,
-                                        save_weights_only=False)
-    callbacks.append(checkpointer_last)
-    
-    # File logging
-    logger = FileLogger(log_file_path=os.path.join(save_path,  
-                                                   "training_log.txt"))
-    callbacks.append(logger)
     
     '''
     Train the model
     '''
     print(' > Training the model...')
     history = model.fit_generator(generator=gen_train.flow(), 
-                                  samples_per_epoch=samples_per_epoch,
+                                  samples_per_epoch=gen_train.num_samples,
                                   nb_epoch=num_epochs,
                                   validation_data=gen_valid.flow(),
                                   nb_val_samples=gen_valid.num_samples,
                                   callbacks=callbacks)
-                                  
+    
 
 def main():
     '''
     Configurable parameters
     '''
     general_settings = OrderedDict((
-        ('experiment_ID', "029"),
-        ('sub_ID', "09"),
+        ('experiment_ID', "031f"),
+        ('sub_ID', "03"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
                                      "Experiments/lits/results")),
+        #('layers_to_not_freeze', ["first_conv_0",
+                                  #"final_conv_0",
+                                  #"final_bn_0",
+                                  #"classifier_conv_0"]),
+        #('layers_to_not_freeze', None),
         ('layers_to_not_freeze', ["first_conv_0",
                                   "final_conv_0",
-                                  "final_bn_0",
-                                  "classifier_conv_0"]),
-        #('layers_to_not_freeze', None),
+                                  "final_bn_0"]),
         ('freeze', True)
         ))
 
@@ -161,12 +203,12 @@ def main():
         ('num_first_conv', 1),
         ('num_final_conv', 1),
         ('num_classifier', 1),
-        ('init', 'he_normal')
+        ('init', 'zero')
         ))
 
     data_gen_kwargs = OrderedDict((
         ('data_path', os.path.join("/export/projects/Candela/datasets/",
-                                   "by_project/lits/data_2.zarr")),
+                                   "by_project/lits/data.zarr")),
         ('nb_io_workers', 2),
         ('nb_proc_workers', 4),
         ('downscale', True)
@@ -198,10 +240,9 @@ def main():
         ('val_batch_size', 200),
         ('num_epochs', 500),
         ('max_patience', 50),
-        ('samples_per_epoch', 1040),
         
         # optimizer
-        ('optimizer', 'RMSprop'),   # options: 'RMSprop'
+        ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
         ('learning_rate', 0.001),
         
         # other
@@ -306,7 +347,7 @@ def main():
         '''
         load_path = os.path.join(general_settings['results_dir'], "stage1",
                                 general_settings['experiment_ID'],
-                                "best_weights_named.hdf5")
+                                "best_weights.hdf5")
         load_and_freeze_weights(model, load_path,
                  freeze=general_settings['freeze'],
                  layers_to_not_freeze=general_settings['layers_to_not_freeze'],
