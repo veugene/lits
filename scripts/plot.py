@@ -56,12 +56,18 @@ def scrub(path, keys):
                 if key in split_line:
                     val_idx = split_line.index(key)+1
                     history[key][epoch].append(float(split_line[val_idx]))
+            #epoch += 1
                     
     # Average keys over each epoch.
     for key in keys:
+        #window = [0]*2000
+        #window = [0]*1
         for epoch in history[key]:
             if history[key][epoch]:
+                #window.append(np.mean(history[key][epoch]))
+                #window.pop(0)
                 history_summary[key].append( np.mean(history[key][epoch]) )
+                #history_summary[key].append( np.mean(window) )
                     
     return history_summary
 
@@ -75,11 +81,15 @@ if __name__=='__main__':
     
     # TEMP
     # Print best score
-    idx = np.argmin(history['val_masked_dice_loss'])
+    #key_val = 'val_masked_dice_loss'
+    #key_train = 'masked_dice_loss'
+    key_val = 'val_dice'
+    key_train = 'dice'
+    idx = np.argmin(history[key_val])
     print("Best validation dice: {}"
-          "".format(history['val_masked_dice_loss'][idx]))
-    print("-- training loss: {}".format(history['masked_dice_loss'][idx]))
-    print("-- epoch {} of {}".format(idx+1, len(history['masked_dice_loss'])))
+          "".format(history[key_val][idx]))
+    print("-- training loss: {}".format(history[key_train][idx]))
+    print("-- epoch {} of {}".format(idx+1, len(history[key_train])))
     # /TEMP
     
      # Color generator for the plots
@@ -108,6 +118,7 @@ if __name__=='__main__':
         ax.axis([0, args.max_x, min_y, max_y])
         ax.plot(history[key][:args.max_x],
                 color=next(color_generator), label=key)
+        ax.yaxis.set_ticks(np.arange(min_y, max_y, (max_y-min_y)/20.))
             
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
     fig.subplots_adjust(top=1.5)

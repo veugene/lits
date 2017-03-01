@@ -68,14 +68,22 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     
 
     # Define model saving callback
-    checkpointer_best = ModelCheckpoint(filepath=os.path.join(save_path,
-                                                          "best_weights.hdf5"),
+    checkpointer_best_fdice = ModelCheckpoint(filepath=os.path.join(save_path,
+                                                    "best_weights_fdice.hdf5"),
                                         verbose=1,
                                         monitor='val_fdice',
                                         mode='max',
                                         save_best_only=True,
                                         save_weights_only=False)
-    callbacks.append(checkpointer_best)
+    checkpointer_best_dice = ModelCheckpoint(filepath=os.path.join(save_path,
+                                                    "best_weights_dice.hdf5"),
+                                        verbose=1,
+                                        monitor='val_dice',
+                                        mode='min',
+                                        save_best_only=True,
+                                        save_weights_only=False)
+    callbacks.append(checkpointer_best_fdice)
+    callbacks.append(checkpointer_best_dice)
     
     # Save every last epoch
     checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
@@ -168,7 +176,7 @@ def main():
     '''
     general_settings = OrderedDict((
         ('experiment_ID', "031f"),
-        ('sub_ID', "03"),
+        ('sub_ID', "05"),
         ('random_seed', 1234),
         ('num_train', 100),
         ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
@@ -177,10 +185,26 @@ def main():
                                   #"final_conv_0",
                                   #"final_bn_0",
                                   #"classifier_conv_0"]),
+        ('layers_to_not_freeze', ["final_bn_0",
+                                  "a_basic_block_1__1_bn",
+                                  "a_basic_block_1__2_bn",
+                                  "d1_basic_block_mp_1_bn_0",
+                                  "d2_basic_block_mp_1_bn_0",
+                                  "d3_basic_block_1__1_bn",
+                                  "d3_basic_block_1__2_bn",
+                                  "d4_basic_block_1__1_bn",
+                                  "d4_basic_block_1__2_bn",
+                                  "d5_basic_block_1__1_bn",
+                                  "d5_basic_block_1__2_bn",
+                                  "u1_basic_block_mp_1_bn_0",
+                                  "u2_basic_block_mp_1_bn_0",
+                                  "u3_basic_block_1__1_bn",
+                                  "u3_basic_block_1__2_bn",
+                                  "u4_basic_block_1__1_bn",
+                                  "u4_basic_block_1__2_bn",
+                                  "u5_basic_block_1__1_bn",
+                                  "u5_basic_block_1__2_bn"]),
         #('layers_to_not_freeze', None),
-        ('layers_to_not_freeze', ["first_conv_0",
-                                  "final_conv_0",
-                                  "final_bn_0"]),
         ('freeze', True)
         ))
 

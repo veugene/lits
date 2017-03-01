@@ -30,12 +30,19 @@ from utils import (data_generator,
 
 def train(model, num_classes, batch_size, val_batch_size, num_epochs,
           max_patience, optimizer, save_path, volume_indices, data_gen_kwargs,
-          data_augmentation_kwargs={}, learning_rate=0.001, show_model=True):
+          data_augmentation_kwargs={}, learning_rate=0.001, num_outputs=1,
+          show_model=True):
+    
+    if num_outputs not in [1, 2]:
+        raise ValueError("num_outputs must be 1 or 2")
     
     '''
     Metrics
     '''
-    metrics = []
+    metrics = {'output_0': []}
+    if num_outputs==2:
+        metrics['output_1'] = []
+        
     
     # Accuracy
     def accuracy(y_true, y_pred):
@@ -45,11 +52,16 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         else:
             return K.mean(K.equal(K.squeeze(y_true, 1),
                                   K.argmax(y_pred, axis=1)))
-    metrics.append(accuracy)
+    metrics['output_0'].append(accuracy)
+    if num_outputs==2:
+        metrics['output_1'].append(accuracy)
         
     # Dice averaged over slices.
-    metrics.append(dice_loss(2))
-    metrics.append(masked_dice_loss)
+    metrics['output_0'].append(dice_loss(2))
+    metrics['output_0'].append(masked_dice_loss)
+    if num_outputs==2:
+        metrics['output_1'].append(dice_loss(1))
+        metrics['output_1'].append(masked_dice_loss)
 
     '''
     Callbacks
@@ -64,7 +76,9 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     # Compute dice on the full data
     full_dice = FullDice()
     callbacks.append(full_dice)
-    metrics.append(FullDice.get_metrics(target_class=2))
+    metrics['output_0'].append(FullDice.get_metrics(target_class=2))
+    if num_outputs==2:
+        metrics['output_1'].append(FullDice.get_metrics(target_class=1))
     
 
     # Define model saving callback
@@ -131,8 +145,11 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     if not hasattr(model, 'optimizer'):
-        model.compile(loss=dice_loss(2), optimizer=optimizer, metrics=metrics)
-
+        losses = {'output_0': dice_loss(2)}
+        if num_outputs==2:
+            losses['output_1'] = dice_loss(1)
+        model.compile(loss=losses, optimizer=optimizer, metrics=metrics)
+        
     '''
     Print model summary
     '''
@@ -201,6 +218,7 @@ def main():
         ('num_first_conv', 1),
         ('num_final_conv', 1),
         ('num_classifier', 1),
+        ('num_outputs', 2),
         ('init', 'he_normal')
         ))
 
@@ -345,6 +363,7 @@ def main():
           save_path=experiment_dir,
           data_gen_kwargs=data_gen_kwargs,
           data_augmentation_kwargs=data_augmentation_kwargs,
+          num_outputs=model_kwargs['num_outputs'],
           **train_kwargs)
         
 
