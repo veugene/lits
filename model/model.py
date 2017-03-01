@@ -43,7 +43,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    batch_norm=True, weight_decay=None, bn_kwargs=None,
                    init='he_normal', cycles_share_weights=True,
                    num_residuals=1, num_first_conv=1, num_final_conv=1,
-                   num_classifier=1):
+                   num_classifier=1, num_outputs=1):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -73,6 +73,8 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     num_first_conv : the number of parallel first convolutions.
     num_final_conv : the number of parallel final convolutions (+BN).
     num_classifier : the number of parallel linear classifiers.
+    num_outputs : the number of model outputs, each with num_classifier
+        classifiers.
     """
     
     '''
@@ -371,30 +373,38 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     if postprocessor_network is not None:
         x = postprocessor_network(x)
     
-    # OUTPUT (SOFTMAX)
+    # OUTPUTs (SIGMOID)
+    all_outputs = []
     if num_classes is not None:
-        # Linear classifier
-        classifiers = []
-        for i in range(num_classifier):
-            output = Convolution2D(num_classes,1,1,activation='linear', 
-                                   W_regularizer=_l2(weight_decay),
-                                   name='classifier_conv_'+str(i))(x)
-            classifiers.append(output)
-        if len(classifiers)>1:
-            output = merge(classifiers, mode='sum')
-        else:
-            output = classifiers[0]
-        output = Permute((2,3,1))(output)
-        if num_classes==1:
-            output = Activation('sigmoid', name='sigmoid')(output)
-        else:
-            output = Activation(_softmax, name='softmax')(output)
-        output = Permute((3,1,2))(output)
+        for i in range(num_outputs):
+            # Linear classifier
+            classifiers = []
+            for j in range(num_classifier):
+                name = 'classifier_conv_'+str(j)
+                if i > 0:
+                    # backwards compatibility
+                    name += '_out'+str(i)
+                output = Convolution2D(num_classes,1,1,activation='linear', 
+                                    W_regularizer=_l2(weight_decay),
+                                    name=name)(x)
+                classifiers.append(output)
+            if len(classifiers)>1:
+                output = merge(classifiers, mode='sum')
+            else:
+                output = classifiers[0]
+            output = Permute((2,3,1))(output)
+            if num_classes==1:
+                output = Activation('sigmoid', name='sigmoid')(output)
+            else:
+                output = Activation(_softmax, name='softmax')(output)
+            output = Permute((3,1,2))(output)
+            output.name ='output_'+str(i)
+            all_outputs.append(output)
     else:
         # No classifier
-        output = x
+        all_outputs = x
     
     # MODEL
-    model = Model(input=input, output=output)
+    model = Model(input=input, output=all_outputs)
 
     return model
