@@ -5,13 +5,6 @@ import zarr
 import random
 import scipy.misc
 
-data_dir = "/export/projects/Candela/datasets/lits_challenge/all/"
-save_dir = "/export/projects/Candela/datasets/by_project/lits/"
-save_name = "data_extended"
-
-# Define class inclusion percentage
-proportion_liver = 0.5
-proportion_bg = 0.3
 
 def get_slices(segm, target_class, exclude_class=None, proportion=1.0):
     """
@@ -53,40 +46,75 @@ def save_slices(vol_np):
 """
 Starting the data preparation script
 """
-save_name += ".zarr"
-save_path = os.path.join(save_dir, save_name)
+def create_dataset(save_name, save_dir, data_dir, proportions):
+    save_name += ".zarr"
+    save_path = os.path.join(save_dir, save_name)
 
-zgroup = zarr.open_group(store=save_path, mode='w', path="/")
-zarr_kwargs = {'chunks': (1, 512, 512),
-               'compressor': zarr.Blosc(cname='lz4', clevel=9, shuffle=1)}
+    zgroup = zarr.open_group(store=save_path, mode='w', path="/")
+    zarr_kwargs = {'chunks': (1, 512, 512),
+                   'compressor': zarr.Blosc(cname='lz4', clevel=9, shuffle=1)}
 
-for i in range(130):
-    print("Processing volume {}".format(i))
-    volume = sitk.ReadImage(os.path.join(data_dir, "volume-"+str(i)+".nii"))
-    volume_np = sitk.GetArrayFromImage(volume)
-    seg = sitk.ReadImage(os.path.join(data_dir, "segmentation-"+str(i)+".nii"))
-    seg_np = sitk.GetArrayFromImage(seg)
+    for i in range(130):
+        print("Processing volume {}".format(i))
+        volume = sitk.ReadImage(os.path.join(data_dir,
+                                             "volume-"+str(i)+".nii"))
+        volume_np = sitk.GetArrayFromImage(volume)
+        seg = sitk.ReadImage(os.path.join(data_dir,
+                                          "segmentation-"+str(i)+".nii"))
+        seg_np = sitk.GetArrayFromImage(seg)
 
-    slices = []
-    if proportion_bg > 0:
-        slices.extend(get_slices(seg_np, target_class=0, exclude_class=1, proportion=proportion_bg))
-    if proportion_liver > 0:
-        slices.extend(get_slices(seg_np, target_class=1, exclude_class=2, proportion=proportion_liver))
-    slices.extend(get_slices(seg_np, target_class=2))
+        slices = []
+        if proportions[0] > 0:
+            slices.extend(get_slices(seg_np, target_class=0,
+                                     exclude_class=[1, 2],
+                                     proportion=proportions[0]))
+        if proportions[1] > 0:
+            slices.extend(get_slices(seg_np, target_class=1,
+                                     exclude_class=2,
+                                     proportion=proportions[1]))
+        if proportions[2] > 0:
+            slices.extend(get_slices(seg_np, target_class=2,
+                                     proportion=proportions[2]))
 
-    volume_np = volume_np[slices]
-    seg_np = seg_np[slices]
+        volume_np = volume_np[slices]
+        seg_np = seg_np[slices]
 
-    # Sanity check
-    # save_slices(seg_np)
+        # Sanity check
+        # save_slices(seg_np)
+        
+        if len(volume_np)==0:
+            print("WARNING! Skipping empty volume #{}".format(i))
+            continue
+        
+        print("Saving {} slices".format(volume_np.shape[0]))
+        subgroup = zgroup.create_group(str(i))
+        subgroup.create_dataset("volume", shape=volume_np.shape,
+                                data=volume_np,
+                                dtype=np.float32, **zarr_kwargs)
+        subgroup.create_dataset("segmentation", shape=seg_np.shape,
+                                data=seg_np,
+                                dtype=np.int16, **zarr_kwargs)
+
+
+if __name__=='__main__':
+    # Define load and save directories
+    data_dir = "/export/projects/Candela/datasets/lits_challenge/all/"
+    save_dir = "/data/TransientData/Candela/lits_challenge/"
     
-    if len(volume_np)==0:
-        print("WARNING! Skipping empty volume #{}".format(i))
-        continue
+    # Save lesion dataset
+    print("########## Preparing lesion dataset ##########")
+    proportions = {0: 0., 1: 0., 2: 1.}
+    create_dataset("data_lesions", save_dir=save_dir, data_dir=data_dir,
+                   proportions=proportions)
     
-    print("Saving {} slices".format(volume_np.shape[0]))
-    subgroup = zgroup.create_group(str(i))
-    subgroup.create_dataset("volume", shape=volume_np.shape, data=volume_np,
-                            dtype=np.float32, **zarr_kwargs)
-    subgroup.create_dataset("segmentation", shape=seg_np.shape, data=seg_np,
-                            dtype=np.int16, **zarr_kwargs)
+    # Save liver dataset
+    print("########## Preparing liver dataset ##########")
+    proportions = {0: 0., 1: 1., 2: 1.}
+    create_dataset("data_liver", save_dir=save_dir, data_dir=data_dir,
+                   proportions=proportions)
+    
+    # Save complete dataset
+    print("########## Preparing liver dataset ##########")
+    proportions = {0: 1., 1: 1., 2: 1.}
+    create_dataset("data_all", save_dir=save_dir, data_dir=data_dir,
+                   proportions=proportions)
