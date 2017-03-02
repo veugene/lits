@@ -133,7 +133,7 @@ model_kwargs = OrderedDict((
 data_gen_kwargs = OrderedDict((
     ('data_path', os.path.join("/data/TransientData/Candela/",
                                 "lits_challenge/data_lesions.zarr")),
-    ('nb_io_workers', 2),
+    ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
     ('downscale', True)
     ))
@@ -162,7 +162,7 @@ train_kwargs = OrderedDict((
     ('num_classes', 1),
     ('batch_size', 40),
     ('val_batch_size', 200),
-    ('num_epochs', 500),
+    ('num_epochs', 150),
     ('max_patience', 50),
     
     # optimizer

@@ -52,6 +52,12 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                **data_gen_kwargs)
     gen_train_flow = repeat_flow(gen_train.flow(), num_outputs=num_outputs)
     gen_valid_flow = repeat_flow(gen_valid.flow(), num_outputs=num_outputs)
+    gen_valid_callback = data_generator(volume_indices=volume_indices['valid'],
+                                        batch_size=batch_size,
+                                        shuffle=False,
+                                        loop_forever=False,
+                                        transform_kwargs=None,
+                                        **data_gen_kwargs)
     
     '''
     Metrics
@@ -89,7 +95,7 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     # Save prediction images
     if save_every:
         save_predictions = SavePredictions(num_epochs=save_every,
-                                           data_gen=gen_valid,
+                                           data_gen=gen_valid_callback,
                                            save_path=os.path.join(save_path,
                                                "predictions"))
         callbacks.append(save_predictions)
@@ -312,12 +318,13 @@ def run(general_settings,
         '''
         Load model weights and freeze some of them.
         '''
-        load_path = os.path.join(general_settings['results_dir'],
-                                 general_settings['load_subpath'])
-        load_and_freeze_weights(model, load_path,
-                 freeze=general_settings['freeze'],
-                 layers_to_not_freeze=general_settings['layers_to_not_freeze'],
-                 verbose=True)
+        if general_settings['load_subpath'] is not None:
+            load_path = os.path.join(general_settings['results_dir'],
+                                     general_settings['load_subpath'])
+            load_and_freeze_weights(model, load_path,
+                freeze=general_settings['freeze'],
+                layers_to_not_freeze=general_settings['layers_to_not_freeze'],
+                verbose=True)
 
     '''
     Run experiment

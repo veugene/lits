@@ -124,6 +124,7 @@ class Dice(Callback):
         val_totals = {}
         logs.update(self.dice)
         for k in self.totals.keys():
+            logs.pop(k)
             if 'val_'+k in logs:
                 val_totals[k] = logs.pop('val_'+k)
         if len(val_totals):
