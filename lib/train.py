@@ -1,6 +1,6 @@
 # Import python libraries
-from collections import OrderedDict
 import numpy as np
+from collections import OrderedDict
 import shutil
 import os
 import sys
@@ -17,26 +17,49 @@ from keras import backend as K
 import keras
 
 # Import in-house libraries
-from callbacks import FullDice
-from model.model import assemble_model
-from model.blocks import (bottleneck,
-                          basic_block,
-                          basic_block_mp)
-from fcn_plusplus.lib.loss import (masked_dice_loss,
-                                   dice_loss)
+from .callbacks import (Dice,
+                        SavePredictions)
+from .model import assemble_model
+from .loss import dice_loss
 from fcn_plusplus.lib.logging import FileLogger
-from utils import (data_generator,
-                   load_and_freeze_weights)
+from .utils import (data_generator,
+                    repeat_flow,
+                    load_and_freeze_weights)
 
 def train(model, num_classes, batch_size, val_batch_size, num_epochs,
           max_patience, optimizer, save_path, volume_indices, data_gen_kwargs,
-          data_augmentation_kwargs={}, learning_rate=0.001, show_model=True):
+          data_augmentation_kwargs={}, learning_rate=0.001, num_outputs=1,
+          save_every=0, show_model=True):
+    
+    if num_outputs not in [1, 2]:
+        raise ValueError("num_outputs must be 1 or 2")
+    
+    '''
+    Data generators for training and validation sets
+    '''
+    print(' > Preparing data generators...')
+    gen_train = data_generator(volume_indices=volume_indices['train'],
+                               batch_size=batch_size,
+                               shuffle=True,
+                               loop_forever=True,
+                               transform_kwargs=data_augmentation_kwargs,
+                               **data_gen_kwargs)
+    gen_valid = data_generator(volume_indices=volume_indices['valid'],
+                               batch_size=batch_size,
+                               shuffle=False,
+                               loop_forever=True,
+                               transform_kwargs=None,
+                               **data_gen_kwargs)
+    gen_train_flow = repeat_flow(gen_train.flow(), num_outputs=num_outputs)
+    gen_valid_flow = repeat_flow(gen_valid.flow(), num_outputs=num_outputs)
     
     '''
     Metrics
     '''
-    metrics = []
-    
+    metrics = {'output_0': []}
+    if num_outputs==2:
+        metrics['output_1'] = []
+        
     # Accuracy
     def accuracy(y_true, y_pred):
         y_true_ = K.clip(y_true-1, 0, 1)
@@ -45,11 +68,13 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         else:
             return K.mean(K.equal(K.squeeze(y_true, 1),
                                   K.argmax(y_pred, axis=1)))
-    metrics.append(accuracy)
+    metrics['output_0'].append(accuracy)
         
     # Dice averaged over slices.
-    metrics.append(dice_loss(2))
-    metrics.append(masked_dice_loss)
+    metrics['output_0'].append(dice_loss(2))
+    metrics['output_0'].append(dice_loss(2, masked_class=0))
+    if num_outputs==2:
+        metrics['output_1'].append(dice_loss([1, 2]))
 
     '''
     Callbacks
@@ -61,29 +86,48 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                    #patience=max_patience, verbose=0)
     #callbacks.append(early_stopping)
     
+    # Save prediction images
+    if save_every:
+        save_predictions = SavePredictions(num_epochs=save_every,
+                                           data_gen=gen_valid,
+                                           save_path=os.path.join(save_path,
+                                               "predictions"))
+        callbacks.append(save_predictions)
+    
     # Compute dice on the full data
-    full_dice = FullDice()
-    callbacks.append(full_dice)
-    metrics.append(FullDice.get_metrics(target_class=2))
+    output_name = 'output_0' if num_outputs==2 else None
+    dice_lesion = Dice(target_class=2, output_name=output_name)
+    dice_lesion_inliver = Dice(target_class=2, mask_class=0,
+                               output_name=output_name)
+    callbacks.extend([dice_lesion, dice_lesion_inliver])
+    metrics['output_0'].extend([dice_lesion.get_metrics(),
+                                dice_lesion_inliver.get_metrics()])
+    if num_outputs==2:
+        dice_liver = Dice(target_class=[1, 2], output_name='output_1')
+        callbacks.append(dice_liver)
+        metrics['output_1'].append(dice_liver.get_metrics())
     
 
     # Define model saving callback
-    checkpointer_best_fdice = ModelCheckpoint(filepath=os.path.join(save_path,
-                                                    "best_weights_fdice.hdf5"),
-                                        verbose=1,
-                                        monitor='val_fdice',
-                                        mode='max',
-                                        save_best_only=True,
-                                        save_weights_only=False)
+    monitor = 'val_dice_2' if num_outputs==1 else 'output_0_val_dice_2'
     checkpointer_best_dice = ModelCheckpoint(filepath=os.path.join(save_path,
                                                     "best_weights_dice.hdf5"),
                                         verbose=1,
-                                        monitor='val_dice',
+                                        monitor=monitor,
+                                        mode='max',
+                                        save_best_only=True,
+                                        save_weights_only=False)
+    monitor = 'val_dice_loss_2' if num_outputs==1 \
+        else 'output_0_val_dice_loss_2'
+    checkpointer_best_ldice = ModelCheckpoint(filepath=os.path.join(save_path,
+                                                    "best_weights_ldice.hdf5"),
+                                        verbose=1,
+                                        monitor=monitor,
                                         mode='min',
                                         save_best_only=True,
                                         save_weights_only=False)
-    callbacks.append(checkpointer_best_fdice)
     callbacks.append(checkpointer_best_dice)
+    callbacks.append(checkpointer_best_ldice)
     
     # Save every last epoch
     checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
@@ -131,8 +175,11 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     if not hasattr(model, 'optimizer'):
-        model.compile(loss=dice_loss(2), optimizer=optimizer, metrics=metrics)
-
+        losses = {'output_0': dice_loss(2)}
+        if num_outputs==2:
+            losses['output_1'] = dice_loss([1, 2])
+        model.compile(loss=losses, optimizer=optimizer, metrics=metrics)
+        
     '''
     Print model summary
     '''
@@ -140,147 +187,34 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         from keras.utils.visualize_util import plot
         #model.summary()
         plot(model, to_file=os.path.join(save_path, 'model.png'))
-
-    '''
-    Data generators for training and validation sets
-    '''
-    print(' > Preparing data generators...')
-    gen_train = data_generator(volume_indices=volume_indices['train'],
-                               batch_size=batch_size,
-                               shuffle=True,
-                               loop_forever=True,
-                               transform_kwargs=data_augmentation_kwargs,
-                               **data_gen_kwargs)
-    gen_valid = data_generator(volume_indices=volume_indices['valid'],
-                               batch_size=batch_size,
-                               shuffle=False,
-                               loop_forever=True,
-                               transform_kwargs=None,
-                               **data_gen_kwargs)
     
     '''
     Train the model
     '''
     print(' > Training the model...')
-    history = model.fit_generator(generator=gen_train.flow(), 
+    history = model.fit_generator(generator=gen_train_flow,
                                   samples_per_epoch=gen_train.num_samples,
                                   nb_epoch=num_epochs,
-                                  validation_data=gen_valid.flow(),
+                                  validation_data=gen_valid_flow,
                                   nb_val_samples=gen_valid.num_samples,
                                   callbacks=callbacks)
+
+
+def run(general_settings,
+        model_kwargs,
+        data_gen_kwargs,
+        data_augmentation_kwargs,
+        train_kwargs):
     
-
-def main():
-    '''
-    Configurable parameters
-    '''
-    general_settings = OrderedDict((
-        ('experiment_ID', "031f"),
-        ('sub_ID', "05"),
-        ('random_seed', 1234),
-        ('num_train', 100),
-        ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
-                                     "Experiments/lits/results")),
-        #('layers_to_not_freeze', ["first_conv_0",
-                                  #"final_conv_0",
-                                  #"final_bn_0",
-                                  #"classifier_conv_0"]),
-        ('layers_to_not_freeze', ["final_bn_0",
-                                  "a_basic_block_1__1_bn",
-                                  "a_basic_block_1__2_bn",
-                                  "d1_basic_block_mp_1_bn_0",
-                                  "d2_basic_block_mp_1_bn_0",
-                                  "d3_basic_block_1__1_bn",
-                                  "d3_basic_block_1__2_bn",
-                                  "d4_basic_block_1__1_bn",
-                                  "d4_basic_block_1__2_bn",
-                                  "d5_basic_block_1__1_bn",
-                                  "d5_basic_block_1__2_bn",
-                                  "u1_basic_block_mp_1_bn_0",
-                                  "u2_basic_block_mp_1_bn_0",
-                                  "u3_basic_block_1__1_bn",
-                                  "u3_basic_block_1__2_bn",
-                                  "u4_basic_block_1__1_bn",
-                                  "u4_basic_block_1__2_bn",
-                                  "u5_basic_block_1__1_bn",
-                                  "u5_basic_block_1__2_bn"]),
-        #('layers_to_not_freeze', None),
-        ('freeze', True)
-        ))
-
-    model_kwargs = OrderedDict((
-        ('input_shape', (1, 256, 256)),
-        ('num_classes', 1),
-        ('num_init_blocks', 2),
-        ('num_main_blocks', 3),
-        ('main_block_depth', 1),
-        ('input_num_filters', 32),
-        ('num_cycles', 1),
-        ('weight_decay', 0.0005), 
-        ('dropout', 0.05),
-        ('batch_norm', True),
-        ('mainblock', basic_block),
-        ('initblock', basic_block_mp),
-        ('bn_kwargs', {'momentum': 0.9, 'mode': 0}),
-        ('cycles_share_weights', True),
-        ('num_residuals', 2),
-        ('num_first_conv', 1),
-        ('num_final_conv', 1),
-        ('num_classifier', 1),
-        ('init', 'zero')
-        ))
-
-    data_gen_kwargs = OrderedDict((
-        ('data_path', os.path.join("/export/projects/Candela/datasets/",
-                                   "by_project/lits/data.zarr")),
-        ('nb_io_workers', 2),
-        ('nb_proc_workers', 4),
-        ('downscale', True)
-        ))
-
-    data_augmentation_kwargs = OrderedDict((
-        ('rotation_range', 15),
-        ('width_shift_range', 0.1),
-        ('height_shift_range', 0.1),
-        ('shear_range', 0.),
-        ('zoom_range', 0.1),
-        ('channel_shift_range', 0.),
-        ('fill_mode', 'constant'),
-        ('cval', 0.),
-        ('cvalMask', 0),
-        ('horizontal_flip', True),
-        ('vertical_flip', True),
-        ('rescale', None),
-        ('spline_warp', True),
-        ('warp_sigma', 0.1),
-        ('warp_grid_size', 3),
-        ('crop_size', None)
-        ))
-
-    train_kwargs = OrderedDict((
-        # data
-        ('num_classes', 1),
-        ('batch_size', 40),
-        ('val_batch_size', 200),
-        ('num_epochs', 500),
-        ('max_patience', 50),
-        
-        # optimizer
-        ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
-        ('learning_rate', 0.001),
-        
-        # other
-        ('show_model', False),
-        ))
-
     # Set random seed
     np.random.seed(general_settings['random_seed'])
 
     # Split data into train, validation
     num_volumes = 130
-    #shuffled_indices = np.random.permutation(num_volumes)
-    exclude =[32, 34, 38, 41, 47, 83, 87, 89, 91, 101, 105, 106, 114, 115, 119]
-    shuffled_indices = list(set(np.arange(num_volumes)).difference(exclude))
+    shuffled_indices = np.arange(num_volumes)
+    if general_settings['exclude_data'] is not None:
+        exclude = general_settings['exclude_data']
+        shuffled_indices = list(set(shuffled_indices).difference(exclude))
     np.random.shuffle(shuffled_indices)
     num_train = general_settings['num_train']
     volume_indices = OrderedDict((
@@ -299,8 +233,7 @@ def main():
         ("Data augmentation settings", data_augmentation_kwargs),
         ("Trainer settings", train_kwargs)
         ))
-    exp = general_settings['experiment_ID']+"_"+general_settings['sub_ID']
-    print("Experiment:", exp)
+    print("Experiment:", general_settings['save_subdir'])
     print("")
     for name, d in all_dicts.items():
         print("#### {} ####".format(name))
@@ -311,7 +244,8 @@ def main():
     '''
     Set up experiment directory
     '''
-    experiment_dir = os.path.join(general_settings['results_dir'],"stage2",exp)
+    experiment_dir = os.path.join(general_settings['results_dir'],
+                                  general_settings['save_subdir'])
     model = None
     if os.path.exists(experiment_dir):
         print("")
@@ -332,10 +266,22 @@ def main():
             shutil.rmtree(experiment_dir)
         if write_into=='c':
             print("Attempting to load model state and continue training.")
+            custom_object_list = []
+            output_name = 'output_0' if num_outputs==2 else None 
+            custom_object_list.append(Dice(2), output_name=output_name)
+            custom_object_list.append(custom_object_list[-1].get_metrics())
+            custom_object_list.append(Dice(2, masked_class=0), 
+                                        output_name=output_name)
+            custom_object_list.append(custom_object_list[-1].get_metrics())
+            custom_object_list.append(Dice([1, 2]), output_name='output_1')
+            custom_object_list.append(custom_object_list[-1].get_metrics())
+            custom_object_list.append(dice_loss(2))
+            custom_object_list.append(dice_loss(2, masked_class=0))
+            custom_object_list.append(dice_loss([1, 2]))
+            custom_objects = dict((f.__name__, f) for f in custom_object_list)
             model = keras.models.load_model( \
                 os.path.join(experiment_dir, "weights.hdf5"),
-                custom_objects={'masked_dice_loss': masked_dice_loss,
-                                'dice': dice_loss(2)})
+                custom_objects=custom_objects)
         print("")
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
@@ -361,17 +307,13 @@ def main():
         Save the model in yaml form
         '''
         yaml_string = model.to_yaml()
-        open(os.path.join(experiment_dir, "model_" +
-                          str(exp)+".yaml"), 'w').write(yaml_string)
+        open(os.path.join(experiment_dir,"model.yaml"), 'w').write(yaml_string)
         
         '''
-        Load stage1 model weights and freeze stage1 weights, except classifier.
-        NOTE: this means that skip connection weights are frozen too -- these
-        will be adjusted later when all weights are unfrozen and fine-tuned.
+        Load model weights and freeze some of them.
         '''
-        load_path = os.path.join(general_settings['results_dir'], "stage1",
-                                general_settings['experiment_ID'],
-                                "best_weights.hdf5")
+        load_path = os.path.join(general_settings['results_dir'],
+                                 general_settings['load_subpath'])
         load_and_freeze_weights(model, load_path,
                  freeze=general_settings['freeze'],
                  layers_to_not_freeze=general_settings['layers_to_not_freeze'],
@@ -385,7 +327,3 @@ def main():
           data_gen_kwargs=data_gen_kwargs,
           data_augmentation_kwargs=data_augmentation_kwargs,
           **train_kwargs)
-        
-
-if __name__ == "__main__":
-    main()

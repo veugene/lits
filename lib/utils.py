@@ -70,8 +70,15 @@ def data_generator(data_path, volume_indices, batch_size,
                          loop_forever=loop_forever,
                          preprocessor=preprocessor,
                          rng=rng)
-    
     return data_gen
+
+
+def repeat_flow(flow, num_outputs):
+    for batch in flow:
+        if num_outputs==1:
+            yield batch
+        else:
+            yield (batch[0], [batch[1] for i in range(num_outputs)])
 
 
 def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,

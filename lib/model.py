@@ -394,11 +394,12 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 output = classifiers[0]
             output = Permute((2,3,1))(output)
             if num_classes==1:
-                output = Activation('sigmoid', name='sigmoid')(output)
+                output = Activation('sigmoid', name='sigmoid'+str(i))(output)
             else:
-                output = Activation(_softmax, name='softmax')(output)
-            output = Permute((3,1,2))(output)
-            output.name ='output_'+str(i)
+                output = Activation(_softmax, name='softmax'+str(i))(output)
+            output_layer = Permute((3,1,2))
+            output_layer.name = 'output_'+str(i)
+            output = output_layer(output)
             all_outputs.append(output)
     else:
         # No classifier
