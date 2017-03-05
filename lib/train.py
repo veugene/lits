@@ -3,6 +3,7 @@ import numpy as np
 from collections import OrderedDict
 import shutil
 import os
+import re
 import sys
 import h5py
 sys.path.append("../")
@@ -29,7 +30,8 @@ from .utils import (data_generator,
 def train(model, num_classes, batch_size, val_batch_size, num_epochs,
           max_patience, optimizer, save_path, volume_indices, data_gen_kwargs,
           data_augmentation_kwargs={}, learning_rate=0.001, num_outputs=1,
-          save_every=0, show_model=True):
+          save_every=0, mask_to_liver=False, show_model=True, initial_epoch=0,
+          evaluate_only=False):
     
     if num_outputs not in [1, 2]:
         raise ValueError("num_outputs must be 1 or 2")
@@ -203,7 +205,8 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                   nb_epoch=num_epochs,
                                   validation_data=gen_valid_flow,
                                   nb_val_samples=gen_valid.num_samples,
-                                  callbacks=callbacks)
+                                  callbacks=callbacks,
+                                  initial_epoch=initial_epoch)
 
 
 def run(general_settings,
@@ -253,6 +256,7 @@ def run(general_settings,
     experiment_dir = os.path.join(general_settings['results_dir'],
                                   general_settings['save_subdir'])
     model = None
+    initial_epoch = 0
     if os.path.exists(experiment_dir):
         print("")
         print("WARNING! Results directory exists: \"{}\"".format(experiment_dir))
@@ -273,13 +277,16 @@ def run(general_settings,
         if write_into=='c':
             print("Attempting to load model state and continue training.")
             custom_object_list = []
-            output_name = 'output_0' if num_outputs==2 else None 
-            custom_object_list.append(Dice(2), output_name=output_name)
+            if model_kwargs['num_outputs']==2:
+                output_name = 'output_0'
+            else:
+                output_name = None 
+            custom_object_list.append(Dice(2, output_name=output_name))
             custom_object_list.append(custom_object_list[-1].get_metrics())
-            custom_object_list.append(Dice(2, masked_class=0), 
-                                        output_name=output_name)
+            custom_object_list.append(Dice(2, mask_class=0,
+                                           output_name=output_name))
             custom_object_list.append(custom_object_list[-1].get_metrics())
-            custom_object_list.append(Dice([1, 2]), output_name='output_1')
+            custom_object_list.append(Dice([1, 2], output_name='output_1'))
             custom_object_list.append(custom_object_list[-1].get_metrics())
             custom_object_list.append(dice_loss(2))
             custom_object_list.append(dice_loss(2, masked_class=0))
@@ -288,6 +295,12 @@ def run(general_settings,
             model = keras.models.load_model( \
                 os.path.join(experiment_dir, "weights.hdf5"),
                 custom_objects=custom_objects)
+            
+            # Identify initial epoch
+            f = open(os.path.join(experiment_dir, "training_log.txt"), 'r')
+            last_line = f.readlines()[-1]
+            last_epoch = int(re.split('[: ]+', last_line)[1])
+            initial_epoch = last_epoch-1
         print("")
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
@@ -333,4 +346,5 @@ def run(general_settings,
           save_path=experiment_dir,
           data_gen_kwargs=data_gen_kwargs,
           data_augmentation_kwargs=data_augmentation_kwargs,
+          initial_epoch=initial_epoch,
           **train_kwargs)
