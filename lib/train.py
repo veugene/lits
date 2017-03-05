@@ -115,16 +115,8 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     
 
     # Define model saving callback
-    monitor = 'val_dice_2' if num_outputs==1 else 'output_0_val_dice_2'
-    checkpointer_best_dice = ModelCheckpoint(filepath=os.path.join(save_path,
-                                                    "best_weights_dice.hdf5"),
-                                        verbose=1,
-                                        monitor=monitor,
-                                        mode='max',
-                                        save_best_only=True,
-                                        save_weights_only=False)
     monitor = 'val_dice_loss_2' if num_outputs==1 \
-        else 'output_0_val_dice_loss_2'
+        else 'val_output_0_dice_loss_2'
     checkpointer_best_ldice = ModelCheckpoint(filepath=os.path.join(save_path,
                                                     "best_weights_ldice.hdf5"),
                                         verbose=1,
@@ -132,8 +124,16 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                         mode='min',
                                         save_best_only=True,
                                         save_weights_only=False)
-    callbacks.append(checkpointer_best_dice)
+    monitor = 'val_dice_2' if num_outputs==1 else 'val_output_0_dice_2'
+    checkpointer_best_dice = ModelCheckpoint(filepath=os.path.join(save_path,
+                                                    "best_weights_dice.hdf5"),
+                                        verbose=1,
+                                        monitor=monitor,
+                                        mode='max',
+                                        save_best_only=True,
+                                        save_weights_only=False)
     callbacks.append(checkpointer_best_ldice)
+    callbacks.append(checkpointer_best_dice)
     
     # Save every last epoch
     checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
