@@ -154,7 +154,7 @@ class SavePredictions(Callback):
         s[0,1]=0
         return s
         
-    def _save_image(self, pred, batch, save_path):    
+    def _save_image(self, pred, batch, batch_num, save_path):    
         for i in range(len(batch[0])):
             s_pred_list = []
             if len(self.model.outputs)==1:
@@ -165,7 +165,8 @@ class SavePredictions(Callback):
             s_input = self._process_slice(batch[0][i])
             s_truth = self._process_slice(batch[1][i]/2.)
             out_image = np.concatenate([s_input]+s_pred_list+[s_truth], axis=1)
-            imsave(os.path.join(save_path, "{}.png".format(i)), out_image)
+            imsave(os.path.join(save_path, "{}_{}.png".format(batch_num, i)),
+                   out_image)
         
     def on_epoch_end(self, epoch, logs=None):
         if epoch%self.num_epochs:
@@ -179,4 +180,4 @@ class SavePredictions(Callback):
         for i in range(len(self.data_gen)):
             batch = next(flow)
             out = self.model.predict_on_batch(batch[0])
-            self._save_image(out, batch, save_path)
+            self._save_image(out, batch, i, save_path)
