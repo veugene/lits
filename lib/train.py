@@ -9,7 +9,10 @@ import h5py
 sys.path.append("../")
 
 # Import keras libraries
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.callbacks import (EarlyStopping,
+                             ModelCheckpoint,
+                             CallbackList,
+                             BaseLogger)
 from keras.optimizers import (RMSprop,
                               nadam,
                               adam,
@@ -183,7 +186,8 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     if not hasattr(model, 'optimizer'):
-        losses = {'output_0': dice_loss(2)}
+        masked_class = 0 if mask_to_liver else None
+        losses = {'output_0': dice_loss(2, masked_class=masked_class)}
         if num_outputs==2:
             losses['output_1'] = dice_loss([1, 2])
         model.compile(loss=losses, optimizer=optimizer, metrics=metrics)
@@ -199,14 +203,101 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     '''
     Train the model
     '''
-    print(' > Training the model...')
-    history = model.fit_generator(generator=gen_train_flow,
-                                  samples_per_epoch=gen_train.num_samples,
-                                  nb_epoch=num_epochs,
-                                  validation_data=gen_valid_flow,
-                                  nb_val_samples=gen_valid.num_samples,
-                                  callbacks=callbacks,
-                                  initial_epoch=initial_epoch)
+    if not evaluate_only:
+        print(' > Training the model...')
+        history = model.fit_generator(generator=gen_train_flow,
+                                      samples_per_epoch=gen_train.num_samples,
+                                      nb_epoch=num_epochs,
+                                      validation_data=gen_valid_flow,
+                                      nb_val_samples=gen_valid.num_samples,
+                                      callbacks=callbacks,
+                                      initial_epoch=initial_epoch)
+    else:
+        print(' > Evaluating the model...')
+        from scipy.misc import imsave
+        
+        # Create directory, if needed
+        save_predictions_to = os.path.join(save_path, "predictions")
+        if not os.path.exists(save_predictions_to):
+            os.makedirs(save_predictions_to)
+            
+        # Initialize callbacks
+        val_callback_list = [BaseLogger(),
+                             dice_lesion,
+                             dice_lesion_inliver]
+        if num_outputs==2:
+            val_callback_list.append(dice_liver)
+        val_callbacks = CallbackList(val_callback_list)
+        val_callbacks.set_params({
+            'nb_epoch': 0,
+            'nb_sample': 0,
+            'verbose': False,
+            'do_validation': True,
+            'metrics': model.metrics_names})
+        val_callbacks.on_train_begin()
+        val_callbacks.on_epoch_begin(0)
+        
+        # Create theano function
+        inputs = model.inputs + model.targets + model.sample_weights
+        if model.uses_learning_phase and \
+                not isinstance(K.learning_phase(), int):
+            inputs += [K.learning_phase()]
+        predict_and_test_function = K.function( \
+            inputs,
+            model.outputs+[model.total_loss]+model.metrics_tensors,
+            updates=model.state_updates)
+        
+        # Loop through batches, applying function and callbacks
+        for batch_num, batch in enumerate(gen_valid_callback.flow()):
+            x, y, sample_weights = model._standardize_user_data(batch[0],
+                                                                batch[1])
+            ins = x+y+sample_weights
+            if model.uses_learning_phase and \
+                    not isinstance(K.learning_phase(), int):
+                ins += [0.]
+            outputs = predict_and_test_function(ins)
+            if num_outputs==1:
+                predictions = outputs[0:1]
+                val_metrics = outputs[1:]
+            else:
+                predictions = outputs[0:2]
+                val_metrics = outputs[2:]
+            
+            # Save images
+            def process_slice(s):
+                s = np.squeeze(s).copy()
+                s[s<0]=0
+                s[s>1]=1
+                s[0,0]=1
+                s[0,1]=0
+                return s
+            for i in range(len(batch[0])):
+                s_pred_list = []
+                for j in range(num_outputs):
+                    #s_pred_list.append(process_slice(predictions[j][i]))
+                    p = predictions[j][i]
+                    p[batch[1][i]==0] = 0
+                    s_pred_list.append(process_slice(p))
+                s_input = process_slice(batch[0][i])
+                s_truth = process_slice(batch[1][i]/2.)
+                out_image = np.concatenate([s_input]+s_pred_list+[s_truth],
+                                           axis=1)
+                imsave(os.path.join(save_predictions_to,
+                                    "{}_{}.png".format(batch_num, i)),
+                       out_image)
+                
+            # Update metrics
+            val_logs = OrderedDict(zip(model.metrics_names, val_metrics))
+            val_logs.update({'batch': batch_num, 'size': len(batch[0])})
+            val_callbacks.on_batch_end(batch_num, val_logs)
+        
+        # Update metrics
+        val_callbacks.on_epoch_end(0, val_logs)
+        
+        # Output metrics
+        for m in val_logs:
+            if m not in ['batch', 'size']:
+                print("{}: {}".format(m, val_logs[m]))
 
 
 def run(general_settings,
@@ -310,7 +401,9 @@ def run(general_settings,
     Save this experiment script in the experiment directory
     '''
     fn = sys.argv[0].rsplit('/', 1)[-1]
-    shutil.copy(sys.argv[0], os.path.join(experiment_dir, fn))
+    if 'evaluate_only' not in train_kwargs or \
+                                             not train_kwargs['evaluate_only']:
+        shutil.copy(sys.argv[0], os.path.join(experiment_dir, fn))
 
     '''
     Assemble model
