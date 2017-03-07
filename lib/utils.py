@@ -12,7 +12,7 @@ def resize_stack(arr, size, interp='bilinear'):
     out = np.zeros((len(arr),)+tuple(size), arr.dtype)
     for i, arr_slice in enumerate(arr):
         out[i] = transform.resize(arr_slice,
-                                  output_shape=(256, 256),
+                                  output_shape=size,
                                   mode='constant',
                                   cval=0,
                                   clip=True,
