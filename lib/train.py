@@ -122,6 +122,8 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     # Define model saving callback
     monitor = 'val_dice_loss_2' if num_outputs==1 \
         else 'val_output_0_dice_loss_2'
+    if mask_to_liver:
+        monitor += '_m0'
     checkpointer_best_ldice = ModelCheckpoint(filepath=os.path.join(save_path,
                                                     "best_weights_ldice.hdf5"),
                                         verbose=1,
