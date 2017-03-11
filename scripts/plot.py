@@ -81,14 +81,16 @@ if __name__=='__main__':
     
     # TEMP
     # Print best score
-    #key_val = 'val_masked_dice_loss'
-    #key_train = 'masked_dice_loss'
-    key_val = 'val_dice'
-    key_train = 'dice'
-    idx = np.argmin(history[key_val])
-    print("Best validation dice: {}"
-          "".format(history[key_val][idx]))
-    print("-- training loss: {}".format(history[key_train][idx]))
+    key_train, key_val = args.keys
+    if np.all(np.greater_equal(history[key_val], 0)):
+        idx = np.argmax(history[key_val])
+    elif np.all(np.less_equal(history[key_val], 0)):
+        idx = np.argmin(history[key_val])
+    else:
+        raise ValueError
+    print("Best validation {}: {}"
+          "".format(key_val, history[key_val][idx]))
+    print("-- training {}: {}".format(key_train, history[key_train][idx]))
     print("-- epoch {} of {}".format(idx+1, len(history[key_train])))
     # /TEMP
     
