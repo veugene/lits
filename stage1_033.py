@@ -73,7 +73,7 @@ train_kwargs = OrderedDict((
     ('num_classes', 1),
     ('batch_size', 40),
     ('val_batch_size', 200),
-    ('num_epochs', 500),
+    ('num_epochs', 100),
     ('max_patience', 50),
     
     # optimizer

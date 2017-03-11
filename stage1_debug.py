@@ -8,8 +8,8 @@ import os
 general_settings = OrderedDict((
     ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
                                     "Experiments/lits/results")),
-    ('save_subdir', "stage1/029f"),
-    ('load_subpath', "stage1/029/best_weights_named.hdf5"),
+    ('save_subdir', "stage1/debug"),
+    ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
     ('layers_to_not_freeze', None),
@@ -38,7 +38,7 @@ model_kwargs = OrderedDict((
     ('num_final_conv', 1),
     ('num_classifier', 1),
     ('num_outputs', 1),
-    ('init', 'zero')
+    ('init', 'he_normal')
     ))
 
 data_gen_kwargs = OrderedDict((
@@ -78,7 +78,7 @@ train_kwargs = OrderedDict((
     
     # optimizer
     ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
-    ('learning_rate', 0.0001),
+    ('learning_rate', 0.001),
     
     # other
     ('show_model', False),

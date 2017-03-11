@@ -7,9 +7,9 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
-                                    "Experiments/lits/results")),
-    ('save_subdir', "stage1/029f"),
-    ('load_subpath', "stage1/029/best_weights_named.hdf5"),
+                                 "Experiments/lits/results")),
+    ('save_subdir', "stage1/034"),
+    ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
     ('layers_to_not_freeze', None),
@@ -37,13 +37,13 @@ model_kwargs = OrderedDict((
     ('num_first_conv', 1),
     ('num_final_conv', 1),
     ('num_classifier', 1),
-    ('num_outputs', 1),
-    ('init', 'zero')
+    ('num_outputs', 2),
+    ('init', 'he_normal')
     ))
 
 data_gen_kwargs = OrderedDict((
     ('data_path', os.path.join("/data/TransientData/Candela/",
-                                "lits_challenge/data_lesions.zarr")),
+                                "lits_challenge/data_liver.zarr")),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
     ('downscale', True)
@@ -73,18 +73,18 @@ train_kwargs = OrderedDict((
     ('num_classes', 1),
     ('batch_size', 40),
     ('val_batch_size', 200),
-    ('num_epochs', 20),
+    ('num_epochs', 100),
     ('max_patience', 50),
     
     # optimizer
     ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
-    ('learning_rate', 0.0001),
+    ('learning_rate', 0.001),
     
     # other
     ('show_model', False),
     ('save_every', 10),         # Save predictions every x epochs
-    ('mask_to_liver', True),
     ))
+train_kwargs['num_outputs'] = model_kwargs['num_outputs']
 
 run(general_settings=general_settings,
     model_kwargs=model_kwargs,

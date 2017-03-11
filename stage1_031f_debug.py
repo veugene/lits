@@ -8,14 +8,14 @@ import os
 general_settings = OrderedDict((
     ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
                                     "Experiments/lits/results")),
-    ('save_subdir', "stage1/029f"),
-    ('load_subpath', "stage1/029/best_weights_named.hdf5"),
+    ('save_subdir', "stage1/031f_debug"),
+    ('load_subpath', "stage1/031f/best_weights.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
     ('layers_to_not_freeze', None),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
                      101, 105, 106, 114, 115, 119]),
-    ('freeze', False)
+    ('freeze', True)
     ))
 
 model_kwargs = OrderedDict((
@@ -82,7 +82,7 @@ train_kwargs = OrderedDict((
     
     # other
     ('show_model', False),
-    ('save_every', 10),         # Save predictions every x epochs
+    ('save_every', None),         # Save predictions every x epochs
     ('mask_to_liver', True),
     ))
 

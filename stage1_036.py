@@ -8,8 +8,8 @@ import os
 general_settings = OrderedDict((
     ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
                                     "Experiments/lits/results")),
-    ('save_subdir', "stage1/029f"),
-    ('load_subpath', "stage1/029/best_weights_named.hdf5"),
+    ('save_subdir', "stage1/036"),
+    ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
     ('layers_to_not_freeze', None),
@@ -19,9 +19,9 @@ general_settings = OrderedDict((
     ))
 
 model_kwargs = OrderedDict((
-    ('input_shape', (1, 256, 256)),
+    ('input_shape', (1, 512, 512)),
     ('num_classes', 1),
-    ('num_init_blocks', 2),
+    ('num_init_blocks', 3),
     ('num_main_blocks', 3),
     ('main_block_depth', 1),
     ('input_num_filters', 32),
@@ -38,7 +38,7 @@ model_kwargs = OrderedDict((
     ('num_final_conv', 1),
     ('num_classifier', 1),
     ('num_outputs', 1),
-    ('init', 'zero')
+    ('init', 'he_normal')
     ))
 
 data_gen_kwargs = OrderedDict((
@@ -46,7 +46,8 @@ data_gen_kwargs = OrderedDict((
                                 "lits_challenge/data_lesions.zarr")),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
-    ('downscale', True)
+    ('downscale', False),
+    ('align_intensity', True)
     ))
 
 data_augmentation_kwargs = OrderedDict((
@@ -71,14 +72,14 @@ data_augmentation_kwargs = OrderedDict((
 train_kwargs = OrderedDict((
     # data
     ('num_classes', 1),
-    ('batch_size', 40),
-    ('val_batch_size', 200),
-    ('num_epochs', 20),
+    ('batch_size', 10),
+    ('val_batch_size', 50),
+    ('num_epochs', 200),
     ('max_patience', 50),
     
     # optimizer
     ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
-    ('learning_rate', 0.0001),
+    ('learning_rate', 0.001),
     
     # other
     ('show_model', False),
