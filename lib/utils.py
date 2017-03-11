@@ -23,7 +23,7 @@ def data_generator(data_path, volume_indices, batch_size,
                    nb_io_workers=1, nb_proc_workers=0,
                    shuffle=False, loop_forever=False, downscale=False,
                    transform_kwargs=None, data_flow_kwargs=None,
-                   rng=None):
+                   align_intensity=False, rng=None):
     if rng is None:
         rng = np.random.RandomState()
     
@@ -46,6 +46,9 @@ def data_generator(data_path, volume_indices, batch_size,
     # Function to rescale the data and do data augmentation, if requested
     def preprocessor(batch):
         b0, b1 = batch
+        if align_intensity:
+            mean_liver = np.mean(b0[b1==1])
+            b0 += 100 - mean_liver
         if downscale:
             b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
             b1 = resize_stack(b1, size=(256, 256), interp='nearest')
