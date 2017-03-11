@@ -88,15 +88,22 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
         f = f['model_weights']
     layer_names = [n.decode('utf8') for n in f.attrs['layer_names']]
     weights_dict = dict(((w.name, w) for w in model.weights))
+    used_names = []
     for name in layer_names:
         g = f[name]
         weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
         for wname in weight_names:
             if wname in weights_dict:
+                if wname in used_names:
+                    raise ValueError("{} already previously loaded!"
+                                     "".format(wname))
+                used_names.append(wname)
                 if verbose:
                     print("Setting weights {}".format(wname))
                 weights_dict[wname].set_value(g[wname][...])
-    
+            else:
+                print("WARNING: {} not found in model (skipped)".format(wname))
+
     if freeze:
         layers_to_freeze = []
         if layers_to_not_freeze is None:
