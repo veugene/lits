@@ -43,7 +43,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    batch_norm=True, weight_decay=None, bn_kwargs=None,
                    init='he_normal', cycles_share_weights=True,
                    num_residuals=1, num_first_conv=1, num_final_conv=1,
-                   num_classifier=1, num_outputs=1):
+                   num_classifier=1, num_outputs=1, use_first_conv=True):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -205,8 +205,11 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     out = outputs[0]
                 return out
             block = make_block(first_block, x)
-        x = block(x)
-        blocks[cycle]['down'][0] = block
+        if use_first_conv:
+            x = block(x)
+            blocks[cycle]['down'][0] = block
+        else:
+            blocks[cycle]['down'][0] = lambda x:x
         tensors[cycle]['down'][0] = x
         print("Cycle {} - FIRST DOWN: {}".format(cycle, x._keras_shape))
         

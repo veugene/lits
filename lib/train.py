@@ -23,7 +23,7 @@ import keras
 # Import in-house libraries
 from .callbacks import (Dice,
                         SavePredictions)
-from .model import assemble_model
+from .model_variants import assemble_model
 from .loss import dice_loss
 from fcn_plusplus.lib.logging import FileLogger
 from .utils import (data_generator,
