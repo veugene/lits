@@ -7,8 +7,8 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', os.path.join("/home/eugene/Experiments/lits/results")),
-    ('save_subdir', "stage1/033"),
-    ('load_subpath', None),
+    ('save_subdir', "stage1/101f"),
+    ('load_subpath', "stage1/101/weights.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
     ('layers_to_not_freeze', None),
@@ -41,8 +41,8 @@ model_kwargs = OrderedDict((
     ))
 
 data_gen_kwargs = OrderedDict((
-    ('data_path', os.path.join("/data/TransientData/Candela/",
-                                "lits_challenge/data_lesions.zarr")),
+    ('data_path', os.path.join("/store/Data/lits_challenge/sorted/",
+                                "data_lesions.zarr")),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
     ('downscale', True)
@@ -72,12 +72,12 @@ train_kwargs = OrderedDict((
     ('num_classes', 1),
     ('batch_size', 40),
     ('val_batch_size', 200),
-    ('num_epochs', 500),
+    ('num_epochs', 20),
     ('max_patience', 50),
     
     # optimizer
     ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
-    ('learning_rate', 0.001),
+    ('learning_rate', 0.0001),
     
     # other
     ('show_model', False),
@@ -89,4 +89,5 @@ run(general_settings=general_settings,
     model_kwargs=model_kwargs,
     data_gen_kwargs=data_gen_kwargs,
     data_augmentation_kwargs=data_augmentation_kwargs,
-    train_kwargs=train_kwargs)
+    train_kwargs=train_kwargs,
+    two_levels=True)
