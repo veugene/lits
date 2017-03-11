@@ -6,9 +6,8 @@ from lib.train import run
 import os
 
 general_settings = OrderedDict((
-    ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
-                                    "Experiments/lits/results")),
-    ('save_subdir', "stage1/debug"),
+    ('results_dir', os.path.join("/home/eugene/Experiments/lits/results")),
+    ('save_subdir', "stage2/202"),
     ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
@@ -38,12 +37,20 @@ model_kwargs = OrderedDict((
     ('num_final_conv', 1),
     ('num_classifier', 1),
     ('num_outputs', 1),
-    ('init', 'he_normal')
+    ('init', 'he_normal'),
+    ('y_net', True),
+    ('y_net_liver_path', "/home/eugene/Experiments/lits/results/"
+                         "stage1/liver_001f/best_weights_dice.hdf5"),
+    ('y_net_lesion_path', "/home/eugene/Experiments/lits/results/"
+                          "stage1/029f_rerun/best_weights_ldice.hdf5"),
+    ('y_net_freeze_liver', False),
+    ('y_net_freeze_lesion', True),
+    ('y_net_extra_input', True),
     ))
 
 data_gen_kwargs = OrderedDict((
-    ('data_path', os.path.join("/data/TransientData/Candela/",
-                                "lits_challenge/data_lesions.zarr")),
+    ('data_path', os.path.join("/store/Data/lits_challenge/sorted/",
+                                "data_liver.zarr")),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
     ('downscale', True)
@@ -73,7 +80,7 @@ train_kwargs = OrderedDict((
     ('num_classes', 1),
     ('batch_size', 40),
     ('val_batch_size', 200),
-    ('num_epochs', 20),
+    ('num_epochs', 200),
     ('max_patience', 50),
     
     # optimizer
@@ -83,8 +90,10 @@ train_kwargs = OrderedDict((
     # other
     ('show_model', False),
     ('save_every', 10),         # Save predictions every x epochs
-    ('mask_to_liver', True),
+    ('mask_to_liver', False),
+    ('liver_only', False)
     ))
+train_kwargs['num_outputs'] = model_kwargs['num_outputs']
 
 run(general_settings=general_settings,
     model_kwargs=model_kwargs,

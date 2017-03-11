@@ -7,7 +7,7 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', os.path.join("/home/eugene/Experiments/lits/results")),
-    ('save_subdir', "stage1/033"),
+    ('save_subdir', "stage1/103"),
     ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
@@ -18,9 +18,9 @@ general_settings = OrderedDict((
     ))
 
 model_kwargs = OrderedDict((
-    ('input_shape', (1, 256, 256)),
+    ('input_shape', (1, 512, 512)),
     ('num_classes', 1),
-    ('num_init_blocks', 2),
+    ('num_init_blocks', 3),
     ('num_main_blocks', 3),
     ('main_block_depth', 1),
     ('input_num_filters', 32),
@@ -37,15 +37,16 @@ model_kwargs = OrderedDict((
     ('num_final_conv', 1),
     ('num_classifier', 1),
     ('num_outputs', 2),
-    ('init', 'he_normal')
+    ('init', 'he_normal'),
+    ('two_levels', True)
     ))
 
 data_gen_kwargs = OrderedDict((
-    ('data_path', os.path.join("/data/TransientData/Candela/",
-                                "lits_challenge/data_lesions.zarr")),
+    ('data_path', os.path.join("/store/Data/lits_challenge/sorted/",
+                                "data_liver.zarr")),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
-    ('downscale', True)
+    ('downscale', False)
     ))
 
 data_augmentation_kwargs = OrderedDict((
@@ -70,9 +71,9 @@ data_augmentation_kwargs = OrderedDict((
 train_kwargs = OrderedDict((
     # data
     ('num_classes', 1),
-    ('batch_size', 40),
-    ('val_batch_size', 200),
-    ('num_epochs', 100),
+    ('batch_size', 10),
+    ('val_batch_size', 50),
+    ('num_epochs', 250),
     ('max_patience', 50),
     
     # optimizer

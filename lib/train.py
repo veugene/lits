@@ -2,6 +2,7 @@
 import numpy as np
 from collections import OrderedDict
 import shutil
+import copy
 import os
 import re
 import sys
@@ -34,10 +35,20 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
           max_patience, optimizer, save_path, volume_indices, data_gen_kwargs,
           data_augmentation_kwargs={}, learning_rate=0.001, num_outputs=1,
           save_every=0, mask_to_liver=False, show_model=True, initial_epoch=0,
-          evaluate_only=False):
+          liver_only=False, evaluate_only=False):
     
     if num_outputs not in [1, 2]:
         raise ValueError("num_outputs must be 1 or 2")
+    
+    if liver_only and num_outputs!=1:
+        raise ValueError("num_outputs must be 1 when liver_only is True")
+    
+    if not liver_only:
+        lesion_output = 'output_0'
+        liver_output = 'output_1'
+    else:
+        lesion_output = None
+        liver_output = 'output_0'
     
     '''
     Data generators for training and validation sets
@@ -67,9 +78,11 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     '''
     Metrics
     '''
-    metrics = {'output_0': []}
-    if num_outputs==2:
-        metrics['output_1'] = []
+    metrics = {}
+    if lesion_output:
+        metrics[lesion_output] = []
+    if num_outputs==2 or lesion_output is None:
+        metrics[liver_output] = []
         
     # Accuracy
     def accuracy(y_true, y_pred):
@@ -79,13 +92,15 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         else:
             return K.mean(K.equal(K.squeeze(y_true, 1),
                                   K.argmax(y_pred, axis=1)))
-    metrics['output_0'].append(accuracy)
+    if lesion_output:
+        metrics[lesion_output].append(accuracy)
         
     # Dice averaged over slices.
-    metrics['output_0'].append(dice_loss(2))
-    metrics['output_0'].append(dice_loss(2, masked_class=0))
-    if num_outputs==2:
-        metrics['output_1'].append(dice_loss([1, 2]))
+    if lesion_output:
+        metrics[lesion_output].append(dice_loss(2))
+        metrics[lesion_output].append(dice_loss(2, masked_class=0))
+    if num_outputs==2 or lesion_output is None:
+        metrics[liver_output].append(dice_loss([1, 2]))
 
     '''
     Callbacks
@@ -106,24 +121,30 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         callbacks.append(save_predictions)
     
     # Compute dice on the full data
-    output_name = 'output_0' if num_outputs==2 else None
-    dice_lesion = Dice(target_class=2, output_name=output_name)
-    dice_lesion_inliver = Dice(target_class=2, mask_class=0,
-                               output_name=output_name)
-    callbacks.extend([dice_lesion, dice_lesion_inliver])
-    metrics['output_0'].extend([dice_lesion.get_metrics(),
-                                dice_lesion_inliver.get_metrics()])
-    if num_outputs==2:
-        dice_liver = Dice(target_class=[1, 2], output_name='output_1')
+    if lesion_output:
+        output_name = lesion_output if num_outputs==2 else None
+        dice_lesion = Dice(target_class=2, output_name=output_name)
+        dice_lesion_inliver = Dice(target_class=2, mask_class=0,
+                                   output_name=output_name)
+        callbacks.extend([dice_lesion, dice_lesion_inliver])
+        metrics[lesion_output].extend([dice_lesion.get_metrics(),
+                                       dice_lesion_inliver.get_metrics()])
+    if num_outputs==2 or lesion_output is None:
+        output_name = liver_output if num_outputs==2 else None
+        dice_liver = Dice(target_class=[1, 2], output_name=output_name)
         callbacks.append(dice_liver)
-        metrics['output_1'].append(dice_liver.get_metrics())
+        metrics[liver_output].append(dice_liver.get_metrics())
     
 
     # Define model saving callback
-    monitor = 'val_dice_loss_2' if num_outputs==1 \
-        else 'val_output_0_dice_loss_2'
-    if mask_to_liver:
-        monitor += '_m0'
+    if lesion_output is not None:
+        monitor = 'val_dice_loss_2' if num_outputs==1 \
+            else 'val_output_0_dice_loss_2'
+        if mask_to_liver:
+            monitor += '_m0'
+    else:
+        monitor = 'val_dice_loss_1_2' if num_outputs==1 \
+            else 'val_output_0_dice_loss_1_2'
     checkpointer_best_ldice = ModelCheckpoint(filepath=os.path.join(save_path,
                                                     "best_weights_ldice.hdf5"),
                                         verbose=1,
@@ -131,7 +152,13 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                         mode='min',
                                         save_best_only=True,
                                         save_weights_only=False)
-    monitor = 'val_dice_2' if num_outputs==1 else 'val_output_0_dice_2'
+    if lesion_output is not None:
+        monitor = 'val_dice_2' if num_outputs==1 else 'val_output_0_dice_2'
+        if mask_to_liver:
+            monitor += '_m0'
+    else:
+        monitor = 'val_dice_1_2' if num_outputs==1 \
+            else 'val_output_0_dice_1_2'
     checkpointer_best_dice = ModelCheckpoint(filepath=os.path.join(save_path,
                                                     "best_weights_dice.hdf5"),
                                         verbose=1,
@@ -141,6 +168,7 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                         save_weights_only=False)
     callbacks.append(checkpointer_best_ldice)
     callbacks.append(checkpointer_best_dice)
+    
     
     # Save every last epoch
     checkpointer_last = ModelCheckpoint(filepath=os.path.join(save_path, 
@@ -189,9 +217,11 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     if not hasattr(model, 'optimizer'):
         masked_class = 0 if mask_to_liver else None
-        losses = {'output_0': dice_loss(2, masked_class=masked_class)}
-        if num_outputs==2:
-            losses['output_1'] = dice_loss([1, 2])
+        losses = {}
+        if lesion_output:
+            losses[lesion_output] = dice_loss(2, masked_class=masked_class)
+        if num_outputs==2 or lesion_output is None:
+            losses[liver_output] = dice_loss([1, 2])
         model.compile(loss=losses, optimizer=optimizer, metrics=metrics)
         
     '''
@@ -310,6 +340,9 @@ def run(general_settings,
     
     # Set random seed
     np.random.seed(general_settings['random_seed'])
+    
+    # Increase the recursion limit to handle resnet skip connections
+    sys.setrecursionlimit(99999)
 
     # Split data into train, validation
     num_volumes = 130
@@ -319,10 +352,13 @@ def run(general_settings,
         shuffled_indices = list(set(shuffled_indices).difference(exclude))
     np.random.shuffle(shuffled_indices)
     num_train = general_settings['num_train']
-    volume_indices = OrderedDict((
-        ('train', shuffled_indices[:num_train]),
-        ('valid', shuffled_indices[num_train:])
-        ))
+    volume_indices = OrderedDict()
+    volume_indices['train'] = shuffled_indices[:num_train]
+    if 'validation_set' in general_settings and \
+        general_settings['validation_set'] is not None:
+        volume_indices['valid'] = general_settings['validation_set']
+    else:
+        volume_indices['valid'] = shuffled_indices[num_train:]
     train_kwargs.update({'volume_indices': volume_indices})
 
     '''
@@ -369,21 +405,27 @@ def run(general_settings,
             shutil.rmtree(experiment_dir)
         if write_into=='c':
             print("Attempting to load model state and continue training.")
-            custom_object_list = []
-            if model_kwargs['num_outputs']==2:
-                output_name = 'output_0'
-            else:
-                output_name = None 
-            custom_object_list.append(Dice(2, output_name=output_name))
-            custom_object_list.append(custom_object_list[-1].get_metrics())
-            custom_object_list.append(Dice(2, mask_class=0,
-                                           output_name=output_name))
-            custom_object_list.append(custom_object_list[-1].get_metrics())
-            custom_object_list.append(Dice([1, 2], output_name='output_1'))
-            custom_object_list.append(custom_object_list[-1].get_metrics())
-            custom_object_list.append(dice_loss(2))
-            custom_object_list.append(dice_loss(2, masked_class=0))
-            custom_object_list.append(dice_loss([1, 2]))
+            custom_object_list = []    
+            if 'liver_only' not in train_kwargs \
+                                             or not train_kwargs['liver_only']:
+                les_output_name = None
+                if model_kwargs['num_outputs']==2:
+                    les_output_name = 'output_0'
+                custom_object_list.append(Dice(2, output_name=les_output_name))
+                custom_object_list.append(custom_object_list[-1].get_metrics())
+                custom_object_list.append(Dice(2, mask_class=0,
+                                               output_name=les_output_name))
+                custom_object_list.append(custom_object_list[-1].get_metrics())
+                custom_object_list.append(dice_loss(2))
+                custom_object_list.append(dice_loss(2, masked_class=0))
+            if model_kwargs['num_outputs']==2 or train_kwargs['liver_only']:
+                liv_output_name = 'output_0'
+                if model_kwargs['num_outputs']==2:
+                    liv_output_name = 'output_1'
+                custom_object_list.append(Dice([1, 2], 
+                                               output_name=liv_output_name))
+                custom_object_list.append(custom_object_list[-1].get_metrics())
+                custom_object_list.append(dice_loss([1, 2]))
             custom_objects = dict((f.__name__, f) for f in custom_object_list)
             model = keras.models.load_model( \
                 os.path.join(experiment_dir, "weights.hdf5"),
@@ -412,8 +454,6 @@ def run(general_settings,
     '''
     if model is None:
         print('\n > Building model...')
-        # Increase the recursion limit to handle resnet skip connections
-        sys.setrecursionlimit(99999)
         model = assemble_model(**model_kwargs)
         print("   number of parameters : ", model.count_params())
 
@@ -433,6 +473,8 @@ def run(general_settings,
                 freeze=general_settings['freeze'],
                 layers_to_not_freeze=general_settings['layers_to_not_freeze'],
                 verbose=True)
+            #model.load_weights(load_path)
+            #model.save_weights(load_path+'.renamed')
 
     '''
     Run experiment

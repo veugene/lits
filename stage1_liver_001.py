@@ -6,14 +6,15 @@ from lib.train import run
 import os
 
 general_settings = OrderedDict((
-    ('results_dir', os.path.join("/home/eugene/Experiments/lits/results")),
-    ('save_subdir', "stage1/033"),
+    ('results_dir', "/home/eugene/Experiments/lits/results"),
+    ('save_subdir', "stage1/liver_001"),
     ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
     ('layers_to_not_freeze', None),
-    ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
-                     101, 105, 106, 114, 115, 119]),
+    ('exclude_data', [83]),
+    ('validation_set', [118, 117, 48, 30, 26, 120, 23, 54,
+                        15, 24, 81, 58, 42, 92, 52]),
     ('freeze', False)
     ))
 
@@ -36,13 +37,13 @@ model_kwargs = OrderedDict((
     ('num_first_conv', 1),
     ('num_final_conv', 1),
     ('num_classifier', 1),
-    ('num_outputs', 2),
+    ('num_outputs', 1),
     ('init', 'he_normal')
     ))
 
 data_gen_kwargs = OrderedDict((
-    ('data_path', os.path.join("/data/TransientData/Candela/",
-                                "lits_challenge/data_lesions.zarr")),
+    ('data_path', os.path.join("/store/Data/lits_challenge/sorted/",
+                                "data_liver.zarr")),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
     ('downscale', True)
@@ -54,7 +55,7 @@ data_augmentation_kwargs = OrderedDict((
     ('height_shift_range', 0.1),
     ('shear_range', 0.),
     ('zoom_range', 0.1),
-    ('channel_shift_range', 0.),
+    ('channel_shift_range', 40.),
     ('fill_mode', 'constant'),
     ('cval', 0.),
     ('cvalMask', 0),
@@ -82,8 +83,8 @@ train_kwargs = OrderedDict((
     # other
     ('show_model', False),
     ('save_every', 10),         # Save predictions every x epochs
+    ('liver_only', True)
     ))
-train_kwargs['num_outputs'] = model_kwargs['num_outputs']
 
 run(general_settings=general_settings,
     model_kwargs=model_kwargs,

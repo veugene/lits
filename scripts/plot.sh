@@ -13,5 +13,5 @@ do
         max_y=0
     fi
     echo ${m}
-    python plot.py --max_x $MAX_X --min_y $min_y --max_y $max_y --keys ${m} val_${m} --title $experiment_ID --source ../results/$STAGE/$experiment_ID/training_log.txt --dest ../results/$STAGE/$experiment_ID/${experiment_ID}_${m}.png
+    python3 plot.py --max_x $MAX_X --min_y $min_y --max_y $max_y --keys ${m} val_${m} --title $experiment_ID --source ../results/$STAGE/$experiment_ID/training_log.txt --dest ../results/$STAGE/$experiment_ID/${experiment_ID}_${m}.png
 done
