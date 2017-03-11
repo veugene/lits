@@ -34,6 +34,13 @@ def _softmax(x):
     e = K.exp(x - K.max(x, axis=-1, keepdims=True))
     s = K.sum(e, axis=-1, keepdims=True)
     return e / s
+
+
+def _unique(name):
+    """
+    Return a unique name string.
+    """
+    return name + '_' + str(K.get_uid(name))
     
     
 def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
@@ -121,7 +128,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             if cycles_share_weights and depth in skips[cycle-1][direction]:
                 conv_layer = skips[cycle-1][direction][depth]
             else:
-                name = 'long_skip_'+str(direction)+'_'+str(depth)
+                name = _unique('long_skip_'+str(direction)+'_'+str(depth))
                 conv_layer = Convolution2D(into._keras_shape[1], 1, 1,
                                            init=init,
                                            border_mode='valid',
@@ -197,7 +204,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     out = Convolution2D(input_num_filters, 3, 3,
                                         init=init, border_mode='same',
                                         W_regularizer=_l2(weight_decay),
-                                        name='first_conv_'+str(i))(x)
+                                        name=_unique('first_conv_'+str(i)))(x)
                     outputs.append(out)
                 if len(outputs)>1:
                     out = merge(outputs, mode='sum')
@@ -348,8 +355,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     out = Convolution2D(input_num_filters, 3, 3,
                                         init=init, border_mode='same',
                                         W_regularizer=_l2(weight_decay),
-                                        name='final_conv_'+str(i))(x)
-                    out = BatchNormalization(axis=1, name='final_bn_'+str(i),
+                                        name=_unique('final_conv_'+str(i)))(x)
+                    out = BatchNormalization(axis=1,
+                                             name=_unique('final_bn_'+str(i)),
                                             **bn_kwargs)(out)
                     out = Activation('relu')(out)
                     outputs.append(out)
@@ -386,7 +394,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     name += '_out'+str(i)
                 output = Convolution2D(num_classes,1,1,activation='linear', 
                                     W_regularizer=_l2(weight_decay),
-                                    name=name)(x)
+                                    name=_unique(name))(x)
                 classifiers.append(output)
             if len(classifiers)>1:
                 output = merge(classifiers, mode='sum')
