@@ -20,9 +20,12 @@ def get_slices(segm, target_class, exclude_class=None, proportion=1.0):
     slices = np.unique(indices[0])
 
     if exclude_class is not None:
-        exclude_indices = np.where(segm==exclude_class)
-        exclude_slices = np.unique(exclude_indices[0])
-        slices = [x for x in slices if x not in exclude_slices]
+        if not hasattr(exclude_class, '__len__'):
+            exclude_class = [exclude_class]
+        for c in exclude_class:
+            exclude_indices = np.where(segm==c)
+            exclude_slices = np.unique(exclude_indices[0])
+            slices = [x for x in slices if x not in exclude_slices]
         
     if proportion < 1.0:
         M = list(range(len(slices)))
@@ -101,20 +104,20 @@ if __name__=='__main__':
     data_dir = "/export/projects/Candela/datasets/lits_challenge/all/"
     save_dir = "/data/TransientData/Candela/lits_challenge/"
     
-    # Save lesion dataset
-    print("########## Preparing lesion dataset ##########")
-    proportions = {0: 0., 1: 0., 2: 1.}
-    create_dataset("data_lesions", save_dir=save_dir, data_dir=data_dir,
-                   proportions=proportions)
+    ## Save lesion dataset
+    #print("########## Preparing lesion dataset ##########")
+    #proportions = {0: 0., 1: 0., 2: 1.}
+    #create_dataset("data_lesions", save_dir=save_dir, data_dir=data_dir,
+                   #proportions=proportions)
     
-    # Save liver dataset
-    print("########## Preparing liver dataset ##########")
-    proportions = {0: 0., 1: 1., 2: 1.}
-    create_dataset("data_liver", save_dir=save_dir, data_dir=data_dir,
-                   proportions=proportions)
+    ## Save liver dataset
+    #print("########## Preparing liver dataset ##########")
+    #proportions = {0: 0., 1: 1., 2: 1.}
+    #create_dataset("data_liver", save_dir=save_dir, data_dir=data_dir,
+                   #proportions=proportions)
     
     # Save complete dataset
-    print("########## Preparing liver dataset ##########")
+    print("########## Preparing complete dataset ##########")
     proportions = {0: 1., 1: 1., 2: 1.}
     create_dataset("data_all", save_dir=save_dir, data_dir=data_dir,
                    proportions=proportions)
