@@ -41,6 +41,8 @@ def assemble_model(stage3=False, two_levels=False, num_residuals_bottom=None,
         output = model(first_conv)
         model = Model(input=input, output=output)
         
+        return model
+        
     elif two_levels:
         assert(not y_net)
         assert(model_kwargs['num_outputs']==2)
