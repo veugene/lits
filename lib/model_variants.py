@@ -2,48 +2,21 @@ from keras.layers import (Input,
                           Activation,
                           Permute,
                           Convolution2D,
+                          BatchNormalization,
                           merge)
 from keras.models import Model
 import copy
 from .model import assemble_model as assemble_cycled_model
-from .model import _l2
+from .model import _l2, _unique, _softmax
 from .callbacks import Dice
 from .loss import dice_loss
 
-def assemble_model(stage3=False, two_levels=False, num_residuals_bottom=None,
+def assemble_model(two_levels=False, num_residuals_bottom=None,
                    y_net=False, y_net_liver_path=None, y_net_lesion_path=None,
                    y_net_freeze_liver=True, y_net_freeze_lesion=True,
-                   y_net_extra_input=False,
-                   **model_kwargs):
-    if stage3:
-        assert(model_kwargs['input_shape']==(1, 512, 512))
-        input = Input(shape=(1, 512, 512))
-        num_filters = model_kwargs['input_num_filters']
-        first_conv = Convolution2D(num_filters, 3, 3,
-                               init=model_kwargs['init'], border_mode='same',
-                               W_regularizer=_l2(model_kwargs['weight_decay']),
-                               name='first_conv_stage3')(input)
-        model_input = model_kwargs['initblock'](nb_filter=num_filters,
-                                     subsample=True, upsample=False,
-                                     skip=True,
-                                     dropout=model_kwargs['dropout'],
-                                     batch_norm=model_kwargs['batch_norm'],
-                                     weight_decay=model_kwargs['weight_decay'],
-                                     num_residuals=1,
-                                     bn_kwargs=model_kwargs['bn_kwargs'],
-                                     init=model_kwargs['init'],
-                                     name='stage3_initblock')(first_conv)
-        stage3_model_kwargs = copy.copy(model_kwargs)
-        stage3_model_kwargs['input_shape'] = (num_filters, 256, 256)
-        stage3_model_kwargs['use_first_conv'] = False
-        model = assemble_cycled_model(**stage3_model_kwargs)
-        model.name = 'output_0'
-        output = model(first_conv)
-        model = Model(input=input, output=output)
+                   y_net_extra_input=False, **model_kwargs):
         
-        return model
-        
-    elif two_levels:
+    if two_levels:
         assert(not y_net)
         assert(model_kwargs['num_outputs']==2)
         
@@ -128,7 +101,8 @@ def assemble_model(stage3=False, two_levels=False, num_residuals_bottom=None,
         return model
         
     else:
-        return assemble_model(**model_kwargs)
+        model = assemble_model(**model_kwargs)
+        return model
     
     
 def freeze_weights(model):

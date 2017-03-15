@@ -85,7 +85,10 @@ def repeat_flow(flow, num_outputs):
 
 
 def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
-                            layers_to_not_freeze=None):
+                            layers_to_not_freeze=None, freeze_mask=None,
+                            load_mask=None, depth_offset=0):
+    if load_mask is None:
+        load_mask = []
     f = h5py.File(load_path, mode='r')
     if 'layer_names' not in f.attrs and 'model_weights' in f:
         f = f['model_weights']
@@ -95,7 +98,28 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
     for name in layer_names:
         g = f[name]
         weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
-        for wname in weight_names:
+        for wname_load in weight_names:
+            
+            # Skip masked out weights.
+            for m in load_mask:
+                if m in wname_load:
+                    continue
+                
+            # Rename weights to account for depth offset.
+            wname_parts = wname_load.split('_')
+            for i, part in enumerate(wname_parts):
+                if part.startswith('d') and part[1:].isdigit():
+                    wname_parts[i] = 'd'+str(int(part[1:])+depth_offset)
+                    break
+                if part.startswith('u') and part[1:].isdigit():
+                    wname_parts[i] = 'u'+str(int(part[1:])+depth_offset)
+                    break
+                if wname_load.startswith('long_skip_') and part.isdigit():
+                    wname_parts[i] = str(int(part)+depth_offset)
+                    break
+            wname = '_'.join(wname_parts)
+            
+            # Set weights
             if wname in weights_dict:
                 if wname in used_names:
                     raise ValueError("{} already previously loaded!"
@@ -103,7 +127,7 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
                 used_names.append(wname)
                 if verbose:
                     print("Setting weights {}".format(wname))
-                weights_dict[wname].set_value(g[wname][...])
+                weights_dict[wname].set_value(g[wname_load][...])
             else:
                 print("WARNING: {} not found in model (skipped)".format(wname))
 
@@ -111,6 +135,8 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
         layers_to_freeze = []
         if layers_to_not_freeze is None:
             layers_to_not_freeze = []
+        if freeze_mask is None:
+            freeze_mask = []
         param_names = ["_W", "_b", "_gamma", "_beta",
                        "_running_mean", "_running_std"]
         for name in layer_names:
@@ -132,7 +158,15 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
             return None
         
         for lname in sorted(set(layers_to_freeze)):
+            skip = False
             if lname in layers_to_not_freeze:
+                skip = True
+            for m in freeze_mask:
+                # Skip masked out weights.
+                if m in lname:
+                    skip = True
+            if skip:
+                print("(Not freezing layer {})".format(lname))
                 continue
             layer = find_layer_in_model(lname, model)
             if layer:

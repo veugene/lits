@@ -30,12 +30,13 @@ from fcn_plusplus.lib.logging import FileLogger
 from .utils import (data_generator,
                     repeat_flow,
                     load_and_freeze_weights)
-
-def train(model, num_classes, batch_size, val_batch_size, num_epochs,
-          max_patience, optimizer, save_path, volume_indices, data_gen_kwargs,
-          data_augmentation_kwargs={}, learning_rate=0.001, num_outputs=1,
-          save_every=0, mask_to_liver=False, show_model=True, initial_epoch=0,
-          liver_only=False, evaluate_only=False):
+    
+    
+def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
+                  optimizer, save_path, volume_indices, data_gen_kwargs,
+                  data_augmentation_kwargs={}, learning_rate=0.001,
+                  num_outputs=1, save_every=0, mask_to_liver=False,
+                  show_model=True, liver_only=False):
     
     if num_outputs not in [1, 2]:
         raise ValueError("num_outputs must be 1 or 2")
@@ -53,22 +54,22 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     '''
     Data generators for training and validation sets
     '''
+    gen = {}
     print(' > Preparing data generators...')
-    gen_train = data_generator(volume_indices=volume_indices['train'],
-                               batch_size=batch_size,
-                               shuffle=True,
-                               loop_forever=True,
-                               transform_kwargs=data_augmentation_kwargs,
-                               **data_gen_kwargs)
-    gen_valid = data_generator(volume_indices=volume_indices['valid'],
-                               batch_size=batch_size,
-                               shuffle=False,
-                               loop_forever=True,
-                               transform_kwargs=None,
-                               **data_gen_kwargs)
-    gen_train_flow = repeat_flow(gen_train.flow(), num_outputs=num_outputs)
-    gen_valid_flow = repeat_flow(gen_valid.flow(), num_outputs=num_outputs)
-    gen_valid_callback = data_generator(volume_indices=volume_indices['valid'],
+    gen['train'] = data_generator(volume_indices=volume_indices['train'],
+                                  batch_size=batch_size,
+                                  shuffle=True,
+                                  loop_forever=True,
+                                  transform_kwargs=data_augmentation_kwargs,
+                                  **data_gen_kwargs)
+    gen['valid'] = data_generator(volume_indices=volume_indices['valid'],
+                                 batch_size=batch_size,
+                                 shuffle=False,
+                                 loop_forever=True,
+                                 transform_kwargs=None,
+                                 **data_gen_kwargs)
+    gen['valid_callback'] = data_generator( \
+                                        volume_indices=volume_indices['valid'],
                                         batch_size=batch_size,
                                         shuffle=False,
                                         loop_forever=False,
@@ -105,7 +106,7 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     '''
     Callbacks
     '''
-    callbacks = []
+    callbacks = {}
     
     ## Define early stopping callback
     #early_stopping = EarlyStopping(monitor='val_acc', mode='max',
@@ -115,10 +116,10 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
     # Save prediction images
     if save_every:
         save_predictions = SavePredictions(num_epochs=save_every,
-                                           data_gen=gen_valid_callback,
+                                           data_gen=gen['valid_callback'],
                                            save_path=os.path.join(save_path,
                                                "predictions"))
-        callbacks.append(save_predictions)
+        callbacks['save_predictions'] = save_predictions
     
     # Compute dice on the full data
     if lesion_output:
@@ -126,13 +127,14 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         dice_lesion = Dice(target_class=2, output_name=output_name)
         dice_lesion_inliver = Dice(target_class=2, mask_class=0,
                                    output_name=output_name)
-        callbacks.extend([dice_lesion, dice_lesion_inliver])
+        callbacks['dice_lesion'] = dice_lesion
+        callbacks['dice_lesion_inliver'] = dice_lesion_inliver
         metrics[lesion_output].extend([dice_lesion.get_metrics(),
                                        dice_lesion_inliver.get_metrics()])
     if num_outputs==2 or lesion_output is None:
         output_name = liver_output if num_outputs==2 else None
         dice_liver = Dice(target_class=[1, 2], output_name=output_name)
-        callbacks.append(dice_liver)
+        callbacks['dice_liver'] = dice_liver
         metrics[liver_output].append(dice_liver.get_metrics())
     
 
@@ -166,8 +168,8 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                         mode='max',
                                         save_best_only=True,
                                         save_weights_only=False)
-    callbacks.append(checkpointer_best_ldice)
-    callbacks.append(checkpointer_best_dice)
+    callbacks['checkpointer_best_ldice'] = checkpointer_best_ldice
+    callbacks['checkpointer_best_dice'] = checkpointer_best_dice
     
     
     # Save every last epoch
@@ -176,12 +178,12 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
                                         verbose=0,
                                         save_best_only=False,
                                         save_weights_only=False)
-    callbacks.append(checkpointer_last)
+    callbacks['checkpointer_last'] = checkpointer_last
     
     # File logging
     logger = FileLogger(log_file_path=os.path.join(save_path,  
                                                    "training_log.txt"))
-    callbacks.append(logger)
+    callbacks['logger'] = logger
     
     '''
     Compile model
@@ -231,112 +233,158 @@ def train(model, num_classes, batch_size, val_batch_size, num_epochs,
         from keras.utils.visualize_util import plot
         #model.summary()
         plot(model, to_file=os.path.join(save_path, 'model.png'))
+
+    return model, callbacks, gen
     
-    '''
-    Train the model
-    '''
-    if not evaluate_only:
-        print(' > Training the model...')
-        history = model.fit_generator(generator=gen_train_flow,
-                                      samples_per_epoch=gen_train.num_samples,
-                                      nb_epoch=num_epochs,
-                                      validation_data=gen_valid_flow,
-                                      nb_val_samples=gen_valid.num_samples,
-                                      callbacks=callbacks,
-                                      initial_epoch=initial_epoch)
-    else:
-        print(' > Evaluating the model...')
-        from scipy.misc import imsave
+    
+def train(model, num_epochs, num_outputs, initial_epoch=0, **kwargs):
+    model, callbacks, gen = prepare_model(model=model,
+                                          num_outputs=num_outputs,
+                                          **kwargs)
+    gen_train_flow = repeat_flow(gen['train'].flow(), num_outputs=num_outputs)
+    gen_valid_flow = repeat_flow(gen['valid'].flow(), num_outputs=num_outputs)
+    
+    print(' > Training the model...')
+    history = model.fit_generator(generator=gen_train_flow,
+                                  samples_per_epoch=gen['train'].num_samples,
+                                  nb_epoch=num_epochs,
+                                  validation_data=gen_valid_flow,
+                                  nb_val_samples=gen['valid'].num_samples,
+                                  callbacks=list(callbacks.values()),
+                                  initial_epoch=initial_epoch)
+    return history
+    
+
+def evaluate(model, save_path, num_outputs, liver_only=False, **kwargs):
+    model, callbacks, gen = prepare_model(model=model,
+                                          save_path=save_path,
+                                          num_outputs=num_outputs,
+                                          liver_only=liver_only,
+                                          **kwargs)
+    
+    print(' > Evaluating the model...')
+    from scipy.misc import imsave
+    
+    # Create directory, if needed
+    save_predictions_to = os.path.join(save_path, "predictions")
+    if not os.path.exists(save_predictions_to):
+        os.makedirs(save_predictions_to)
         
-        # Create directory, if needed
-        save_predictions_to = os.path.join(save_path, "predictions")
-        if not os.path.exists(save_predictions_to):
-            os.makedirs(save_predictions_to)
-            
-        # Initialize callbacks
-        val_callback_list = [BaseLogger(),
-                             dice_lesion,
-                             dice_lesion_inliver]
-        if num_outputs==2:
-            val_callback_list.append(dice_liver)
-        val_callbacks = CallbackList(val_callback_list)
-        val_callbacks.set_params({
-            'nb_epoch': 0,
-            'nb_sample': 0,
-            'verbose': False,
-            'do_validation': True,
-            'metrics': model.metrics_names})
-        val_callbacks.on_train_begin()
-        val_callbacks.on_epoch_begin(0)
-        
-        # Create theano function
-        inputs = model.inputs + model.targets + model.sample_weights
+    # Initialize callbacks
+    val_callback_list = [BaseLogger()]
+    if not liver_only:
+        val_callback_list.extend([callbacks['dice_lesion'],
+                                  callbacks['dice_lesion_inliver']])
+    if len(model.outputs)==2 or liver_only:
+        val_callback_list.append(callbacks['dice_liver'])
+    val_callbacks = CallbackList(val_callback_list)
+    val_callbacks.set_params({
+        'nb_epoch': 0,
+        'nb_sample': 0,
+        'verbose': False,
+        'do_validation': True,
+        'metrics': model.metrics_names})
+    val_callbacks.on_train_begin()
+    val_callbacks.on_epoch_begin(0)
+    
+    # Create theano function
+    inputs = model.inputs + model.targets + model.sample_weights
+    if model.uses_learning_phase and \
+            not isinstance(K.learning_phase(), int):
+        inputs += [K.learning_phase()]
+    predict_and_test_function = K.function( \
+        inputs,
+        model.outputs+[model.total_loss]+model.metrics_tensors,
+        updates=model.state_updates)
+    
+    # Loop through batches, applying function and callbacks
+    flow = repeat_flow(gen['valid_callback'].flow(), num_outputs=num_outputs)
+    for batch_num, batch in enumerate(flow):
+        x, y, sample_weights = model._standardize_user_data(batch[0],
+                                                            batch[1])
+        ins = x+y+sample_weights
         if model.uses_learning_phase and \
                 not isinstance(K.learning_phase(), int):
-            inputs += [K.learning_phase()]
-        predict_and_test_function = K.function( \
-            inputs,
-            model.outputs+[model.total_loss]+model.metrics_tensors,
-            updates=model.state_updates)
+            ins += [0.]
+        outputs = predict_and_test_function(ins)
+        if num_outputs==1:
+            predictions = outputs[0:1]
+            val_metrics = outputs[1:]
+        else:
+            predictions = outputs[0:2]
+            val_metrics = outputs[2:]
         
-        # Loop through batches, applying function and callbacks
-        for batch_num, batch in enumerate(gen_valid_callback.flow()):
-            x, y, sample_weights = model._standardize_user_data(batch[0],
-                                                                batch[1])
-            ins = x+y+sample_weights
-            if model.uses_learning_phase and \
-                    not isinstance(K.learning_phase(), int):
-                ins += [0.]
-            outputs = predict_and_test_function(ins)
+        # Save images
+        def process_slice(s):
+            s = np.squeeze(s).copy()
+            s[s<0]=0
+            s[s>1]=1
+            s[0,0]=1
+            s[0,1]=0
+            return s
+        for i in range(len(batch[0])):
+            s_pred_list = []
             if num_outputs==1:
-                predictions = outputs[0:1]
-                val_metrics = outputs[1:]
+                s_pred_list = [process_slice(predictions[i])]
             else:
-                predictions = outputs[0:2]
-                val_metrics = outputs[2:]
-            
-            # Save images
-            def process_slice(s):
-                s = np.squeeze(s).copy()
-                s[s<0]=0
-                s[s>1]=1
-                s[0,0]=1
-                s[0,1]=0
-                return s
-            for i in range(len(batch[0])):
-                s_pred_list = []
                 for j in range(num_outputs):
-                    #s_pred_list.append(process_slice(predictions[j][i]))
-                    p = predictions[j][i]
-                    p[batch[1][i]==0] = 0
-                    s_pred_list.append(process_slice(p))
-                s_input = process_slice(batch[0][i])
+                    s_pred_list.append(process_slice(predictions[j][i]))
+            s_input = process_slice(batch[0][i])
+            if num_outputs==1:
                 s_truth = process_slice(batch[1][i]/2.)
-                out_image = np.concatenate([s_input]+s_pred_list+[s_truth],
-                                           axis=1)
-                imsave(os.path.join(save_predictions_to,
-                                    "{}_{}.png".format(batch_num, i)),
-                       out_image)
-                
-            # Update metrics
-            val_logs = OrderedDict(zip(model.metrics_names, val_metrics))
-            val_logs.update({'batch': batch_num, 'size': len(batch[0])})
-            val_callbacks.on_batch_end(batch_num, val_logs)
-        
+            else:
+                s_truth = process_slice(batch[1][0][i]/2.)
+            out_image = np.concatenate([s_input]+s_pred_list+[s_truth],
+                                        axis=1)
+            imsave(os.path.join(save_predictions_to,
+                                "{}_{}.png".format(batch_num, i)),
+                    out_image)
+            
         # Update metrics
-        val_callbacks.on_epoch_end(0, val_logs)
-        
-        # Output metrics
-        for m in val_logs:
-            if m not in ['batch', 'size']:
-                print("{}: {}".format(m, val_logs[m]))
+        val_logs = OrderedDict(zip(model.metrics_names, val_metrics))
+        val_logs.update({'batch': batch_num, 'size': len(batch[0])})
+        val_callbacks.on_batch_end(batch_num, val_logs)
+    
+    # Update metrics
+    val_callbacks.on_epoch_end(0, val_logs)
+    
+    # Output metrics
+    for m in val_logs:
+        if m not in ['batch', 'size']:
+            print("{}: {}".format(m, val_logs[m]))
+            
+            
+def load_model(path, num_outputs, liver_only):
+    custom_object_list = []    
+    if not liver_only:
+        les_output_name = None
+        if num_outputs==2:
+            les_output_name = 'output_0'
+        custom_object_list.append(Dice(2, output_name=les_output_name))
+        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.append(Dice(2, mask_class=0,
+                                       output_name=les_output_name))
+        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.append(dice_loss(2))
+        custom_object_list.append(dice_loss(2, masked_class=0))
+    if num_outputs==2 or liver_only:
+        liv_output_name = 'output_0'
+        if num_outputs==2:
+            liv_output_name = 'output_1'
+        custom_object_list.append(Dice([1, 2], output_name=liv_output_name))
+        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.append(dice_loss([1, 2]))
+    custom_objects = dict((f.__name__, f) for f in custom_object_list)
+    model = keras.models.load_model(path, custom_objects=custom_objects)
+    return model
 
 
 def run(general_settings,
         model_kwargs,
         data_gen_kwargs,
         data_augmentation_kwargs,
-        train_kwargs):
+        train_kwargs,
+        loader_kwargs=None):
     
     # Set random seed
     np.random.seed(general_settings['random_seed'])
@@ -403,39 +451,23 @@ def run(general_settings,
         if write_into=='r':
             print("WARNING: Deleting existing results directory.")
             shutil.rmtree(experiment_dir)
-        if write_into=='c':
-            print("Attempting to load model state and continue training.")
-            custom_object_list = []    
-            if 'liver_only' not in train_kwargs \
-                                             or not train_kwargs['liver_only']:
-                les_output_name = None
-                if model_kwargs['num_outputs']==2:
-                    les_output_name = 'output_0'
-                custom_object_list.append(Dice(2, output_name=les_output_name))
-                custom_object_list.append(custom_object_list[-1].get_metrics())
-                custom_object_list.append(Dice(2, mask_class=0,
-                                               output_name=les_output_name))
-                custom_object_list.append(custom_object_list[-1].get_metrics())
-                custom_object_list.append(dice_loss(2))
-                custom_object_list.append(dice_loss(2, masked_class=0))
-            if model_kwargs['num_outputs']==2 or train_kwargs['liver_only']:
-                liv_output_name = 'output_0'
-                if model_kwargs['num_outputs']==2:
-                    liv_output_name = 'output_1'
-                custom_object_list.append(Dice([1, 2], 
-                                               output_name=liv_output_name))
-                custom_object_list.append(custom_object_list[-1].get_metrics())
-                custom_object_list.append(dice_loss([1, 2]))
-            custom_objects = dict((f.__name__, f) for f in custom_object_list)
-            model = keras.models.load_model( \
-                os.path.join(experiment_dir, "weights.hdf5"),
-                custom_objects=custom_objects)
+        if write_into in ['c']:
+            print("Loading model.")
+            liver_only = False
+            if 'liver_only' in train_kwargs and train_kwargs['liver_only']:
+                liver_only = True
+            model = load_model(path=os.path.join(experiment_dir,
+                                                 "weights.hdf5"),
+                               num_outputs=model_kwargs['num_outputs'],
+                               liver_only=liver_only)
             
             # Identify initial epoch
-            f = open(os.path.join(experiment_dir, "training_log.txt"), 'r')
-            last_line = f.readlines()[-1]
-            last_epoch = int(re.split('[: ]+', last_line)[1])
-            initial_epoch = last_epoch-1
+            log_path = os.path.join(experiment_dir, "training_log.txt")
+            if os.path.exists(log_path):
+                f = open(log_path, 'r')
+                last_line = f.readlines()[-1]
+                last_epoch = int(re.split('[: ]+', last_line)[1])
+                initial_epoch = last_epoch-1
         print("")
     if not os.path.exists(experiment_dir):
         os.makedirs(experiment_dir)
@@ -445,9 +477,7 @@ def run(general_settings,
     Save this experiment script in the experiment directory
     '''
     fn = sys.argv[0].rsplit('/', 1)[-1]
-    if 'evaluate_only' not in train_kwargs or \
-                                             not train_kwargs['evaluate_only']:
-        shutil.copy(sys.argv[0], os.path.join(experiment_dir, fn))
+    shutil.copy(sys.argv[0], os.path.join(experiment_dir, fn))
 
     '''
     Assemble model
@@ -469,12 +499,30 @@ def run(general_settings,
         if general_settings['load_subpath'] is not None:
             load_path = os.path.join(general_settings['results_dir'],
                                      general_settings['load_subpath'])
-            load_and_freeze_weights(model, load_path,
-                freeze=general_settings['freeze'],
-                layers_to_not_freeze=general_settings['layers_to_not_freeze'],
-                verbose=True)
+            if loader_kwargs is None:
+                loader_kwargs = {}
+                for key in ['freeze', 'layers_to_not_freeze']:
+                    # Backward compatibility
+                    if key in general_settings:
+                        loader_kwargs[key] = general_settings[key]
+            load_and_freeze_weights(model, load_path, verbose=True,
+                                    **loader_kwargs)
+            #model.save(os.path.join(experiment_dir, "model.hdf5"))
             #model.load_weights(load_path)
             #model.save_weights(load_path+'.renamed')
+            
+    '''
+    Evaluate
+    '''
+    if 'evaluate' in general_settings and general_settings['evaluate']:
+        print("Evaluating model on validation set.")
+        evaluate_kwargs = dict([(kw, train_kwargs[kw]) for kw in train_kwargs \
+            if kw not in ['num_epochs', 'initial_epoch']])
+        evaluate(model=model,
+                save_path=os.path.join(experiment_dir, "predictions"),
+                data_gen_kwargs=data_gen_kwargs,
+                **evaluate_kwargs)
+        sys.exit()
 
     '''
     Run experiment
