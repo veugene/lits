@@ -147,7 +147,7 @@ if __name__=='__main__':
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     
-    for i in range(87,130):
+    for i in range(0,130):
         print("Processing volume {}".format(i))
         volume = sitk.ReadImage(os.path.join(data_dir,
                                              "volume-"+str(i)+".nii.gz"))
@@ -179,16 +179,11 @@ if __name__=='__main__':
             save_path = os.path.join(save_dir, "patch_set_{}.hdf5".format(i))
             create_dataset(save_path=save_path,
                            patchsize=patch_size,
-                           volume=volume_np,
-                           mask=mask,
+                           volume=volume_np.T,
+                           mask=mask.T,
                            class_list=[1, 2],
-                           random_order=True,
+                           random_order=False,
                            batchsize=32,
                            file_format='hdf5',
                            show_progress=True)
-            
-            mask_sitk = sitk.GetImageFromArray(mask)
-            mask_sitk.CopyInformation(seg)
-            sitk.WriteImage(mask_sitk,
-                            os.path.join(save_dir, "{}_mask.nii.gz".format(i)))
-    
+        
