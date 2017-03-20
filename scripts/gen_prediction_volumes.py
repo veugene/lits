@@ -37,25 +37,33 @@ def parse():
                         help="average predictions over all 8 possible flips "
                              "and rotations of each slice",
                         required=False, action='store_true')
+    parser.add_argument('--downscale',
+                        help="specify whether to downscale inputs to half "
+                             "resolution (256, 256)",
+                        required=False, action='store_true')
+    parser.add_argument('--use_predicted_liver',
+                        help="whether to clip to predicted volumes rather "
+                             "than ground truth volumes",
+                        required=False, action='store_true')
     return parser.parse_args()
     
     
-def preprocess(volume):
-    out = resize_stack(volume.astype(np.float32),
-                       size=(256, 256), interp='bilinear')
+def preprocess(volume, downscale=False):
+    out = volume.astype(np.float32)
+    if downscale:
+        out = resize_stack(out,size=(256, 256), interp='bilinear')
     out = np.expand_dims(out, 1)
     out /= 255.
     out = np.clip(out, -2., 2.)
     return out
 
 
-def postprocess(volume):
-    print("values ... ", volume.min(), volume.max(), volume.mean())
+def postprocess(volume, downscale=False):
+    #print("values ... ", volume.min(), volume.max(), volume.mean())
     out = (volume >= 0.5).astype(np.int16)
     out = np.squeeze(out, axis=1)
-    out = resize_stack(out, size=(512, 512), interp='nearest')
-    print("prediction: ", volume.shape)
-    print("postprocess: ", out.shape)
+    if downscale:
+        out = resize_stack(out, size=(512, 512), interp='nearest')
     return out
 
 
@@ -79,15 +87,18 @@ def select_slices(liver_volume, liver_extent):
     
     All nonzero values in the liver_volume are taken as liver labels.
     """
-    mask = largest_connected_component(liver_volume>0)
-    indices = np.unique(np.where(liver_volume)[0])
+    mask = largest_connected_component(liver_volume>0.5)
+    indices = np.unique(np.where(mask)[0])
     if liver_extent:
-        indices = [i for i in range(indices[0]-liver_extent,
-                                    indices[-1]+liver_extent)]
-    return indices
+        min_idx = max(0, indices[0]-liver_extent)
+        max_idx = min(len(mask), indices[-1]+liver_extent+1)
+        indices = [i for i in range(min_idx, max_idx)]
+    return indices, mask
 
 
 def load_model(model_path):
+    sys.setrecursionlimit(99999)
+    
     input_varieties = [(None, 'output_1'),
                        ('output_0', 'output_1')]
     
@@ -113,10 +124,12 @@ def load_model(model_path):
             model = keras.models.load_model(model_path,
                                             custom_objects=custom_objects)
         except ValueError:
-            try_next_input(iter_inputs)
+            model = try_next_input(iter_inputs)
         except StopIteration:
             print("Failed to instantiate the correct set of custom objects "
                   "to load the model.")
+            raise
+        except:
             raise
         return model
         
@@ -131,21 +144,25 @@ def predict(volume, model, many_orientations):
            #(np.rot90, np.fliplr, np.flipud)]
     ops = [(lambda x:x,), (np.fliplr,), (np.flipud,), (np.fliplr, np.flipud)]
     num_ops = 4 if many_orientations else 1
-    predictions = []
+    num_outputs = len(model.outputs)
+    predictions = [[] for i in range(num_outputs)]
     for i in range(num_ops):
         op_set = ops[i]
         v = volume.T
         for op in op_set:
             v = op(v)
         pred = model.predict(v.T)
-        p = pred.T
-        for op in op_set[::-1]:
-            p = op(p)
-        predictions.append(p.T)
-    prediction = np.mean(predictions, axis=0)
+        if num_outputs==1:
+            pred = [pred]
+        for j, p in enumerate(pred):
+            p = p.T
+            for op in op_set[::-1]:
+                p = op(p)
+            predictions[j].append(p.T)
+    prediction = [np.mean(predictions[j], axis=0) for j in range(num_outputs)]
     return prediction
 
-    
+
 if __name__=='__main__':
     args = parse()
 
@@ -156,33 +173,40 @@ if __name__=='__main__':
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     
-    model = load_model(args.model_path)
+    #model = load_model(args.model_path)
     
     ldata_iter = None
-    if len(args.liver_data_files):
-        ldata_iter = iter(args.liver_data_files)
-    for path in args.data_files:
+    if args.liver_data_files is not None:
+        if not hasattr(args.liver_data_files, '__len__'):
+            ldata_iter = iter([args.liver_data_files])
+        else:
+            ldata_iter = iter(args.liver_data_files)
+    for path in args.data_files[14:15]:
         fn = path.split('/')[-1]
         print("Processing {}".format(path))
         im_f = sitk.ReadImage(path)
         im_np = sitk.GetArrayFromImage(im_f)
-        print("im_np: ", im_np.shape)
-        input_volume = preprocess(im_np)
-        print("input_volume: ", input_volume.shape)
-        output_volume = postprocess(predict(input_volume,
-                                            model,
-                                            args.many_orientations))
-        if ldata_iter:
-            liver_path = next(ldata_iter)
-            liver_f = sitk.ReadImage(liver_path)
-            liver_np = sitk.GetArrayFromImage(liver_f)
-            indices = select_slices(liver_np, args.liver_extent)
-            output_volume[:indices[0]] = 0
-            output_volume[indices[-1]:] = 0
-        print("output_volume: ", output_volume.shape)
-        out_f = sitk.GetImageFromArray(output_volume)
-        #out_f.CopyInformation(im_f)
-        out_f.SetSpacing(im_f.GetSpacing())
-        sitk.WriteImage(out_f, os.path.join(args.output_dir,
-                                            fn[:-4]+'.nii.gz'))
+        input_volume = preprocess(im_np, downscale=args.downscale)
+        model = load_model(args.model_path)
+        outputs = predict(input_volume, model, args.many_orientations)
+        outputs = [postprocess(out,
+                               downscale=args.downscale) for out in outputs]
+        if ldata_iter or args.use_predicted_liver:
+            if ldata_iter:
+                liver_path = next(ldata_iter)
+                liver_f = sitk.ReadImage(liver_path)
+                liver_np = sitk.GetArrayFromImage(liver_f)
+            else:
+                liver_np = outputs[1]
+            indices, liver_np = select_slices(liver_np, args.liver_extent)
+            outputs[0][:indices[0]] = 0
+            outputs[0][indices[-1]:] = 0
+            outputs[1][...] = liver_np
+        for i, output_volume in enumerate(outputs):
+            out_f = sitk.GetImageFromArray(output_volume)
+            out_f.SetSpacing(im_f.GetSpacing())
+            out_f.SetOrigin(im_f.GetOrigin())
+            out_f.SetDirection(im_f.GetDirection())
+            filename = fn[:-4]+"_output_{}.nii.gz".format(i)
+            sitk.WriteImage(out_f, os.path.join(args.output_dir, filename))
             
