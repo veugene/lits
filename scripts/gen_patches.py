@@ -127,6 +127,7 @@ def get_sampling_mask(scan, labels, voxel_spacing,
     other_mask[liver_slice_indices,:,:] = True
     other_mask[lesion_mask] = False
     other_mask[lesion_periphery_mask] = False
+    other_mask[labels==1] = False
     indices = sample_points(other_mask, fraction_random)
     nonlesion_mask[indices] = True
     
