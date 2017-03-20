@@ -101,7 +101,7 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         return model
         
     else:
-        model = assemble_model(**model_kwargs)
+        model = assemble_cycled_model(**model_kwargs)
         return model
     
     
