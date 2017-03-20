@@ -106,7 +106,7 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
     '''
     Callbacks
     '''
-    callbacks = {}
+    callbacks = OrderedDict()
     
     ## Define early stopping callback
     #early_stopping = EarlyStopping(monitor='val_acc', mode='max',

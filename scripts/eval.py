@@ -22,6 +22,9 @@ def parse():
     parser.add_argument('--results',
                         help="path to save results csv file",
                         required=False, type=str)
+    parser.add_argument('--threshold',
+                        help="threshold probability for lesion detection",
+                        required=False, type=float, default=0.5)
     return parser.parse_args()
 
 
@@ -36,7 +39,7 @@ def get_scores(pred,label,vxlspacing):
     volscores['jaccard'] = volscores['dice']/(2.-volscores['dice'])
     volscores['voe'] = 1. - volscores['jaccard']
     
-    print("DEBUG: ", np.count_nonzero(label), np.count_nonzero(pred))
+    #print("DEBUG: ", np.count_nonzero(label), np.count_nonzero(pred))
     #if np.count_nonzero(label)==0:
         #print("DEBUG: ground truth has no lesions!")
     #if np.count_nonzero(pred)==0:
@@ -69,29 +72,31 @@ if __name__=='__main__':
     #labels = sorted(glob.glob(os.path.join(args.label_dir,
                                            #'segmentation*.nii')))
     probs = sorted(glob.glob(os.path.join(args.prediction_dir,
-                                          'volume*.nii.gz')))
+                                          'volume*_output_0.nii.gz')))
     labels = []
     for p in probs:
         p_fn = p.split('/')[-1]
-        l_fn = 'segmentation'+p_fn[6:-7]+'.nii'
+        num = p_fn[6:-7].split('_')[0]
+        l_fn = 'segmentation'+num+'.nii'
         labels.append(os.path.join(args.label_dir, l_fn))
 
     results = []
     outpath = args.results or "results.csv"
 
     for label, prob in zip(labels,probs):
-        print(prob)
+        #print(prob)
         loaded_label = nb.load(label)
         loaded_prob = nb.load(prob)
 
         #liver_scores = get_scores(loaded_prob.get_data()>=1,
                                   #loaded_label.get_data()>=1,
                                   #loaded_label.header.get_zooms()[:3])
-        lesion_scores = get_scores(loaded_prob.get_data()>0,
+        lesion_scores = get_scores(loaded_prob.get_data()>args.threshold,
                                    loaded_label.get_data()==2,
                                    loaded_label.header.get_zooms()[:3])
         #print("Liver dice: {}".format(liver_scores['dice']))
-        print("Lesion dice: {}".format(lesion_scores['dice']))
+        #print("Lesion dice: {}".format(lesion_scores['dice']))
+        print(lesion_scores['dice'])
 
         #results.append([label, liver_scores, lesion_scores])
         results.append([label, lesion_scores])
