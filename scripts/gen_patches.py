@@ -151,17 +151,28 @@ if __name__=='__main__':
         print("Processing volume {}".format(i))
         volume = sitk.ReadImage(os.path.join(data_dir,
                                              "volume-"+str(i)+".nii.gz"))
-        volume_np = sitk.GetArrayFromImage(volume)
+        volume_np = sitk.GetArrayFromImage(volume).astype(np.float32)
+        assert(volume_np.shape[1:]==(512,512))
         seg = sitk.ReadImage(os.path.join(data_dir,
                                           "segmentation-"+str(i)+".nii.gz"))
         seg_np = sitk.GetArrayFromImage(seg)
-        spacing = volume.GetSpacing()[::-1]
-        assert(volume_np.shape[1:]==(512,512))
-        
-        mask = get_sampling_mask(scan=volume_np,
-                                 labels=seg_np,
-                                 voxel_spacing=spacing,
-                                 **sample_mask_kwargs)
+        mask_path = os.path.join(save_dir, "{}_mask.nii.gz".format(i))
+        if not os.path.exists(mask_path):
+            spacing = volume.GetSpacing()[::-1]
+            mask = get_sampling_mask(scan=volume_np,
+                                    labels=seg_np,
+                                    voxel_spacing=spacing,
+                                    **sample_mask_kwargs)
+            mask_sitk = sitk.GetImageFromArray(mask)
+            mask_sitk.CopyInformation(seg)
+            sitk.WriteImage(mask_sitk, mask_path)
+        else:
+            mask_sitk = sitk.ReadImage(mask_path)
+            mask = sitk.GetArrayFromImage(mask_sitk)
+            
+        # Shift to median liver value.
+        if np.count_nonzero(seg_np==1):
+            volume_np += 100. - np.median(volume_np[seg_np==1])
         
         if np.count_nonzero(mask):
             print("saving patches to file")
