@@ -120,6 +120,20 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
             wname = '_'.join(wname_parts)
             
             # Set weights
+            
+            ## TEMP
+            #if wname not in weights_dict:
+                #wname_parts = wname_load.split('_')
+                #new_wname_parts = []
+                #for i, part in enumerate(wname_parts):
+                    #if not part.isdigit():
+                        #new_wname_parts.append(part)
+                    #else:
+                        #new_wname_parts.append(part)
+                        #new_wname_parts.append('1')
+                #wname = '_'.join(new_wname_parts)
+            ## /TEMP
+                
             if wname in weights_dict:
                 if wname in used_names:
                     raise ValueError("{} already previously loaded!"
