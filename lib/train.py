@@ -34,9 +34,12 @@ from .utils import (data_generator,
     
 def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                   optimizer, save_path, volume_indices, data_gen_kwargs,
-                  data_augmentation_kwargs={}, learning_rate=0.001,
+                  data_augmentation_kwargs=None, learning_rate=0.001,
                   num_outputs=1, save_every=0, mask_to_liver=False,
                   show_model=True, liver_only=False):
+    
+    if data_augmentation_kwargs is None:
+        data_augmentation_kwargs = {}
     
     if num_outputs not in [1, 2]:
         raise ValueError("num_outputs must be 1 or 2")
@@ -149,11 +152,11 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
             else 'val_output_0_dice_loss_1_2'
     checkpointer_best_ldice = ModelCheckpoint(filepath=os.path.join(save_path,
                                                     "best_weights_ldice.hdf5"),
-                                        verbose=1,
-                                        monitor=monitor,
-                                        mode='min',
-                                        save_best_only=True,
-                                        save_weights_only=False)
+                                              verbose=1,
+                                              monitor=monitor,
+                                              mode='min',
+                                              save_best_only=True,
+                                              save_weights_only=False)
     if lesion_output is not None:
         monitor = 'val_dice_2' if num_outputs==1 else 'val_output_0_dice_2'
         if mask_to_liver:
@@ -163,11 +166,11 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
             else 'val_output_0_dice_1_2'
     checkpointer_best_dice = ModelCheckpoint(filepath=os.path.join(save_path,
                                                     "best_weights_dice.hdf5"),
-                                        verbose=1,
-                                        monitor=monitor,
-                                        mode='max',
-                                        save_best_only=True,
-                                        save_weights_only=False)
+                                             verbose=1,
+                                             monitor=monitor,
+                                             mode='max',
+                                             save_best_only=True,
+                                             save_weights_only=False)
     callbacks['checkpointer_best_ldice'] = checkpointer_best_ldice
     callbacks['checkpointer_best_dice'] = checkpointer_best_dice
     
@@ -436,7 +439,8 @@ def run(general_settings,
     initial_epoch = 0
     if os.path.exists(experiment_dir):
         print("")
-        print("WARNING! Results directory exists: \"{}\"".format(experiment_dir))
+        print("WARNING! Results directory exists: \"{}\""
+              "".format(experiment_dir))
         write_into = None
         while write_into not in ['y', 'n', 'r', 'c', '']:
             write_into = str.lower(input( \
@@ -510,6 +514,7 @@ def run(general_settings,
             #model.save(os.path.join(experiment_dir, "model.hdf5"))
             #model.load_weights(load_path)
             #model.save_weights(load_path+'.renamed')
+            #sys.exit()
             
     '''
     Evaluate
