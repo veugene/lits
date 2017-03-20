@@ -96,18 +96,19 @@ skips = ['d4_basic_block_1_shortcut_1_conv2d',
 general_settings = OrderedDict((
     ('results_dir', os.path.join("/home/imagia/eugene.vorontsov-home/",
                                  "Experiments/lits/results")),
-    ('save_subdir', "stage2/029f_02"),
-    ('load_subpath', "stage1/029f/best_weights_ldice.hdf5.renamed"),
+    ('save_subdir', "stage3/029f_01-1f"),
+    ('load_subpath', "stage3/029f_01-1/best_weights_ldice.hdf5.renamed"),
     ('random_seed', 1234),
     ('num_train', 100),
-    ('layers_to_not_freeze', final_bn+branch0_bn),
+    ('layers_to_not_freeze', final_bn+branch0_bn+branch1_bn\
+                             +['first_conv_stage3', 'stage3_initblock']),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
                      101, 105, 106, 114, 115, 119]),
     ('freeze', True)
     ))
 
 model_kwargs = OrderedDict((
-    ('input_shape', (1, 256, 256)),
+    ('input_shape', (1, 512, 512)),
     ('num_classes', 1),
     ('num_init_blocks', 2),
     ('num_main_blocks', 3),
@@ -125,8 +126,9 @@ model_kwargs = OrderedDict((
     ('num_first_conv', 1),
     ('num_final_conv', 1),
     ('num_classifier', 1),
-    ('num_outputs', 2),
-    ('init', 'zero')
+    ('num_outputs', 1),
+    ('init', 'zero'),
+    ('stage3', True)
     ))
 
 data_gen_kwargs = OrderedDict((
@@ -134,7 +136,7 @@ data_gen_kwargs = OrderedDict((
                                 "lits_challenge/data_liver.zarr")),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
-    ('downscale', True)
+    ('downscale', False)
     ))
 
 data_augmentation_kwargs = OrderedDict((
@@ -159,14 +161,14 @@ data_augmentation_kwargs = OrderedDict((
 train_kwargs = OrderedDict((
     # data
     ('num_classes', 1),
-    ('batch_size', 40),
-    ('val_batch_size', 200),
-    ('num_epochs', 250),
+    ('batch_size', 10),
+    ('val_batch_size', 50),
+    ('num_epochs', 40),
     ('max_patience', 50),
     
     # optimizer
     ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
-    ('learning_rate', 0.001),
+    ('learning_rate', 0.0001),
     
     # other
     ('show_model', False),
