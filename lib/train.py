@@ -23,10 +23,10 @@ import keras
 
 # Import in-house libraries
 from .callbacks import (Dice,
-                        SavePredictions)
+                        SavePredictions,
+                        FileLogger)
 from .model_variants import assemble_model
 from .loss import dice_loss
-from fcn_plusplus.lib.logging import FileLogger
 from .utils import (data_generator,
                     repeat_flow,
                     load_and_freeze_weights)
@@ -132,13 +132,13 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                                    output_name=output_name)
         callbacks['dice_lesion'] = dice_lesion
         callbacks['dice_lesion_inliver'] = dice_lesion_inliver
-        metrics[lesion_output].extend([dice_lesion.get_metrics(),
-                                       dice_lesion_inliver.get_metrics()])
+        metrics[lesion_output].extend(dice_lesion.get_metrics())
+        metrics[lesion_output].extend(dice_lesion_inliver.get_metrics())
     if num_outputs==2 or lesion_output is None:
         output_name = liver_output if num_outputs==2 else None
         dice_liver = Dice(target_class=[1, 2], output_name=output_name)
         callbacks['dice_liver'] = dice_liver
-        metrics[liver_output].append(dice_liver.get_metrics())
+        metrics[liver_output].extend(dice_liver.get_metrics())
     
 
     # Define model saving callback
@@ -249,10 +249,10 @@ def train(model, num_epochs, num_outputs, initial_epoch=0, **kwargs):
     
     print(' > Training the model...')
     history = model.fit_generator(generator=gen_train_flow,
-                                  samples_per_epoch=gen['train'].num_samples,
-                                  nb_epoch=num_epochs,
+                                  steps_per_epoch=len(gen['train']),
+                                  epochs=num_epochs,
                                   validation_data=gen_valid_flow,
-                                  nb_val_samples=gen['valid'].num_samples,
+                                  validation_steps=len(gen['valid']),
                                   callbacks=list(callbacks.values()),
                                   initial_epoch=initial_epoch)
     return history
@@ -364,10 +364,10 @@ def load_model(path, num_outputs, liver_only):
         if num_outputs==2:
             les_output_name = 'output_0'
         custom_object_list.append(Dice(2, output_name=les_output_name))
-        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.extend(custom_object_list[-1].get_metrics())
         custom_object_list.append(Dice(2, mask_class=0,
                                        output_name=les_output_name))
-        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.extend(custom_object_list[-1].get_metrics())
         custom_object_list.append(dice_loss(2))
         custom_object_list.append(dice_loss(2, masked_class=0))
     if num_outputs==2 or liver_only:
@@ -375,7 +375,7 @@ def load_model(path, num_outputs, liver_only):
         if num_outputs==2:
             liv_output_name = 'output_1'
         custom_object_list.append(Dice([1, 2], output_name=liv_output_name))
-        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.extend(custom_object_list[-1].get_metrics())
         custom_object_list.append(dice_loss([1, 2]))
     custom_objects = dict((f.__name__, f) for f in custom_object_list)
     model = keras.models.load_model(path, custom_objects=custom_objects)

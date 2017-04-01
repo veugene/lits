@@ -1,9 +1,11 @@
+from __future__ import print_function
 from keras.callbacks import Callback
 from keras import backend as K
 from scipy.misc import imsave
 import theano
 import numpy as np
 import os
+
 
 class Dice(Callback):
     """
@@ -62,7 +64,7 @@ class Dice(Callback):
         All intermediate metrics are divided by the number of samples to
         counterbalance the way keras collects metrics across batches (by
         averaging across all samples).
-        '''
+        '''    
         def full_dice_metrics(y_true, y_pred):
             y_true_f = K.flatten(y_true)
             y_true_f = K.cast(y_true_f, 'int32')
@@ -81,8 +83,20 @@ class Dice(Callback):
                     'd_A'+self.tag: K.sum(y_target)/n,
                     'd_B'+self.tag: K.sum(y_pred_f)/n,
                     'dice'+self.tag: theano.tensor.as_tensor_variable(0)}
-        full_dice_metrics.__name__ = self._name('dice_metrics')
-        return full_dice_metrics
+        
+        def keras_wrapper(key):
+            # A function wrapper for keras' broken API
+            def wrapper(y_true, y_pred):
+                out = full_dice_metrics(y_true, y_pred)
+                return out[key]
+            # Ugly hack to name a metric, required by keras' API
+            wrapper.__name__ = key
+            return wrapper
+        
+        metrics = []
+        for key in ['d_I', 'd_A', 'd_B', 'dice']:
+            metrics.append(keras_wrapper(key+self.tag))
+        return metrics
     
     def on_epoch_begin(self, epoch, logs=None):
         self.totals = {self._name('d_I'): 0,
@@ -181,3 +195,53 @@ class SavePredictions(Callback):
             batch = next(flow)
             out = self.model.predict_on_batch(batch[0])
             self._save_image(out, batch, i, save_path)
+
+
+class FileLogger(Callback):
+    '''Callback that prints loss and metrics to file.
+    '''
+    def __init__(self, log_file_path, log_write_mode='at'):
+        self.log_file_path = log_file_path
+        self.log_write_mode = log_write_mode
+
+    def __del__(self):
+        if hasattr(self, 'log_file') and self.log_file is not None:
+            self.log_file.close()
+
+    def write_log(self, log_values):
+        if self.log_file is not None:
+            msg = "Epoch {} - batch {} :: ".format(self.epoch, self.batch)
+            for i, key in enumerate(sorted(self.log_values.keys())):
+                if i>0:
+                    msg += " - "
+                msg += str(key)+": "+str(self.log_values[key])
+            print(msg, file=self.log_file)
+            self.log_file.flush()
+
+    def on_train_begin(self, logs={}):
+        self.epochs = self.params['epochs']
+        self.epoch = 0
+        if self.log_file_path is not None:
+            try:
+                self.log_file = open(self.log_file_path, self.log_write_mode)
+            except:
+                print("Failed to open file in FileLogger: "
+                      "{}".format(self.log_file_path))
+                raise
+
+    def on_epoch_begin(self, epoch, logs={}):
+        self.epoch = epoch
+
+    def on_batch_begin(self, batch, logs={}):
+        self.batch = batch
+        self.log_values = {}
+
+    def on_batch_end(self, batch, logs={}):
+        batch_size = logs.get('size', 0)
+        for k in self.params['metrics']:
+            if k in logs:
+                self.log_values[k] = logs[k]
+        self.write_log(self.log_values)
+
+    def on_epoch_end(self, epoch, logs={}):
+        pass

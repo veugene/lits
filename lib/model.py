@@ -4,9 +4,9 @@ from keras.layers import (Input,
                           Dense,
                           Permute,
                           Lambda,
-                          merge,
-                          BatchNormalization,
-                          Convolution2D)
+                          BatchNormalization)
+from keras.layers.merge import add as merge_add
+from .blocks import Convolution
 from keras import backend as K
 from theano import tensor as T
 from keras.regularizers import l2
@@ -48,7 +48,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    preprocessor_network=None, postprocessor_network=None,
                    mainblock=None, initblock=None, dropout=0.,
                    batch_norm=True, weight_decay=None, bn_kwargs=None,
-                   init='he_normal', cycles_share_weights=True,
+                   init='he_normal', ndim=2, cycles_share_weights=True,
                    num_residuals=1, num_first_conv=1, num_final_conv=1,
                    num_classifier=1, num_outputs=1,
                    use_first_conv=True, use_final_conv=True):
@@ -76,6 +76,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     dropout : the dropout probability, introduced in every block.
     batch_norm : enable or disable batch normalization.
     weight_decay : the weight decay (L2 penalty) used in every convolution.
+    bn_kwargs : keyword arguments to pass to batch norm layers.
+    init : string or function specifying the initializer for layers.
+    ndim : the spatial dimensionality of the input and output (2 or 3)
     cycles_share_weights : share network weights across cycles.
     num_residuals : the number of parallel residual functions per block.
     num_first_conv : the number of parallel first convolutions.
@@ -130,29 +133,30 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 conv_layer = skips[cycle-1][direction][depth]
             else:
                 name = _unique('long_skip_'+str(direction)+'_'+str(depth))
-                conv_layer = Convolution2D(into._keras_shape[1], 1, 1,
-                                           init=init,
-                                           border_mode='valid',
-                                           W_regularizer=_l2(weight_decay),
-                                           name=name)
+                conv_layer = Convolution(filters=into._keras_shape[1],
+                                         kernel_size=1,
+                                         ndim=ndim,
+                                         kernel_initializer=init,
+                                         padding='valid',
+                                         kernel_regularizer=_l2(weight_decay),
+                                         name=name)
             skips[cycle][direction][depth] = conv_layer
             x = conv_layer(x)
         
-        out = merge([x, into], mode='sum')
+        out = merge_add([x, into])
         if bn_status==False:
             # When batch norm is disabled, halve the merged values since it is
             # not a residual that is being summed in on a long skip connection.
             out = Lambda(lambda x: x/2., output_shape=lambda x:x)(out)
         return out
-        #return x
     
     '''
     Given some block function and an input tensor, return a reusable model
     instantiating that block function. This is to allow weight sharing.
     '''
     def make_block(block_func, x):
-        x_nb_filter = x._keras_shape[1]
-        input = Input(shape=(x_nb_filter, None, None))
+        x_filters = x._keras_shape[1]
+        input = Input(shape=(x_filters,)+tuple([None]*ndim))
         model = Model(input, block_func(input))
         return model
     
@@ -164,7 +168,8 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     'weight_decay': weight_decay,
                     'num_residuals': num_residuals,
                     'bn_kwargs': bn_kwargs,
-                    'init': init}
+                    'init': init,
+                    'ndim': ndim}
     if bn_kwargs is None:
         bn_kwargs = {}
     
@@ -202,13 +207,14 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             def first_block(x):
                 outputs = []
                 for i in range(num_first_conv):
-                    out = Convolution2D(input_num_filters, 3, 3,
-                                        init=init, border_mode='same',
-                                        W_regularizer=_l2(weight_decay),
-                                        name=_unique('first_conv_'+str(i)))(x)
+                    out = Convolution(filters=input_num_filters,
+                                      kernel_size=3, ndim=ndim,
+                                      kernel_initializer=init, padding='same',
+                                      kernel_regularizer=_l2(weight_decay),
+                                      name=_unique('first_conv_'+str(i)))(x)
                     outputs.append(out)
                 if len(outputs)>1:
-                    out = merge(outputs, mode='sum')
+                    out = merge_add(outputs)
                 else:
                     out = outputs[0]
                 return out
@@ -232,7 +238,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 block = blocks[cycle-1]['down'][depth]
             else:
                 block_func = residual_block(initblock,
-                                            nb_filter=input_num_filters,
+                                            filters=input_num_filters,
                                             repetitions=1,
                                             subsample=True,
                                             upsample=False,
@@ -257,7 +263,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 block = blocks[cycle-1]['down'][depth]
             else:
                 block_func = residual_block(mainblock,
-                                            nb_filter=input_num_filters*(2**b),
+                                            filters=input_num_filters*(2**b),
                                             repetitions=get_repetitions(b),
                                             subsample=True,
                                             upsample=False,
@@ -281,7 +287,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         else:
             block_func = residual_block( \
                                   mainblock,
-                                  nb_filter=input_num_filters*(2**b),
+                                  filters=input_num_filters*(2**b),
                                   repetitions=get_repetitions(num_main_blocks),
                                   subsample=True,
                                   upsample=True,
@@ -308,7 +314,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             else:
                 
                 block_func = residual_block(mainblock,
-                                            nb_filter=input_num_filters*(2**b),
+                                            filters=input_num_filters*(2**b),
                                             repetitions=get_repetitions(b),
                                             subsample=False,
                                             upsample=True,
@@ -332,7 +338,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 block = blocks[cycle-1]['up'][depth]
             else:
                 block_func = residual_block(initblock,
-                                            nb_filter=input_num_filters,
+                                            filters=input_num_filters,
                                             repetitions=1,
                                             subsample=False,
                                             upsample=True,
@@ -356,9 +362,11 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             def final_block(x):
                 outputs = []
                 for i in range(num_final_conv):
-                    out = Convolution2D(input_num_filters, 3, 3,
-                                        init=init, border_mode='same',
-                                        W_regularizer=_l2(weight_decay),
+                    out = Convolution(filters=input_num_filters,
+                                      kernel_size=3, ndim=ndim,
+                                      kernel_initializer=init, padding='same',
+                                      kernel_regularizer=_l2(weight_decay),
+                                      
                                         name=_unique('final_conv_'+str(i)))(x)
                     out = BatchNormalization(axis=1,
                                              name=_unique('final_bn_'+str(i)),
@@ -366,7 +374,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     out = Activation('relu')(out)
                     outputs.append(out)
                 if len(outputs)>1:
-                    out = merge(outputs, mode='sum')
+                    out = merge_add(outputs)
                 else:
                     out = outputs[0]
                 return out
@@ -399,20 +407,27 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 if i > 0:
                     # backwards compatibility
                     name += '_out'+str(i)
-                output = Convolution2D(num_classes,1,1,activation='linear', 
-                                    W_regularizer=_l2(weight_decay),
-                                    name=_unique(name))(x)
+                output = Convolution(filters=num_classes, kernel_size=1, 
+                                     ndim=ndim, activation='linear', 
+                                     kernel_regularizer=_l2(weight_decay),
+                                     name=_unique(name))(x)
                 classifiers.append(output)
             if len(classifiers)>1:
-                output = merge(classifiers, mode='sum')
+                output = merge_add(classifiers)
             else:
                 output = classifiers[0]
-            output = Permute((2,3,1))(output)
+            if ndim==2:
+                output = Permute((2,3,1))(output)
+            else:
+                output = Permute((2,3,4,1))(output)
             if num_classes==1:
                 output = Activation('sigmoid', name='sigmoid'+str(i))(output)
             else:
                 output = Activation(_softmax, name='softmax'+str(i))(output)
-            output_layer = Permute((3,1,2))
+            if ndim==2:
+                output_layer = Permute((3,1,2))
+            else:
+                output_layer = Permute((4,1,2,3))
             output_layer.name = 'output_'+str(i)
             output = output_layer(output)
             all_outputs.append(output)
@@ -421,6 +436,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         all_outputs = x
     
     # MODEL
-    model = Model(input=input, output=all_outputs)
+    model = Model(inputs=input, outputs=all_outputs)
 
     return model

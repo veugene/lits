@@ -1,9 +1,9 @@
 from keras.layers import (Input,
                           Activation,
                           Permute,
-                          Convolution2D,
-                          BatchNormalization,
-                          merge)
+                          BatchNormalization)
+from keras.layers.merge import concatenate as merge_concatenate
+from .blocks import Convolution
 from keras.models import Model
 import copy
 from .model import assemble_model as assemble_cycled_model
@@ -40,24 +40,32 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         
         # Connect first model to second
         liver_output_pre = model_liver(model_input)
-        lesion_input = merge([model_input, liver_output_pre],
-                              mode='concat', concat_axis=1)
+        lesion_input = merge_concatenate([model_input, liver_output_pre], 
+                                         axis=1)
         
         # Create classifier for liver
-        liver_output = Convolution2D(1,1,1, activation='linear',
-                            W_regularizer=_l2(model_kwargs['weight_decay']),
-                            name='classifier_conv_1')(liver_output_pre)
-        liver_output = Permute((2,3,1))(liver_output)
+        liver_output = Convolution(filters=1, kernel_size=1,
+                          ndim=model_kwargs['ndim'],
+                          activation='linear',
+                          kernel_regularizer=_l2(model_kwargs['weight_decay']),
+                          name='classifier_conv_1')(liver_output_pre)
+        if model_kwargs['ndim']==2:
+            liver_output = Permute((2,3,1))(liver_output)
+        else:
+            liver_output = Permute((2,3,4,1))(liver_output)
         liver_output = Activation('sigmoid',name='sigmoid_1')(liver_output)
-        liver_output_layer = Permute((3,1,2))
+        if model_kwargs['ndim']==2:
+            liver_output_layer = Permute((3,1,2))
+        else:
+            liver_output_layer = Permute((4,1,2,3))
         liver_output_layer.name = 'output_1'
         liver_output = liver_output_layer(liver_output)
         
         # Create aggregate model
         model_lesion.name = 'output_0'
         lesion_output = model_lesion(lesion_input)
-        model = Model(input=model_input, output=[lesion_output,
-                                                 liver_output])
+        model = Model(inputs=model_input, outputs=[lesion_output,
+                                                   liver_output])
         return model
     
     elif y_net:
@@ -89,15 +97,14 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         model_top = assemble_cycled_model(**model_top_kwargs)
         
         # Feed liver and lesion models into top model
-        top_input = merge([model_liver(model_input),
-                           model_lesion(model_input)],
-                          mode='concat',
-                          concat_axis=1)
+        top_input = merge_concatenate([model_liver(model_input),
+                                       model_lesion(model_input)],
+                                      axis=1)
         output = model_top(top_input)
         
         # Create the aggregate model
         model_top.name = 'output_0'
-        model = Model(input=model_input, output=output)
+        model = Model(inputs=model_input, outputs=output)
         return model
         
     else:

@@ -4,26 +4,94 @@ from skimage import transform
 import numpy as np
 from data_tools.data_augmentation import random_transform
 from data_tools.io import data_flow
-from data_tools.wrap import multi_source_array
+from data_tools.wrap import (multi_source_array,
+                             delayed_view)
 from keras import backend as K
 
 
 def resize_stack(arr, size, interp='bilinear'):
-    out = np.zeros((len(arr),)+tuple(size), arr.dtype)
-    for i, arr_slice in enumerate(arr):
-        out[i] = transform.resize(arr_slice,
-                                  output_shape=size,
-                                  mode='constant',
-                                  cval=0,
-                                  clip=True,
-                                  preserve_range=True)
+    """
+    Resize each slice (indexed at dimension 0) of a 3D volume or of each 3D
+    volume in a stack of volumes.
+    """
+    if arr.ndim==3:
+        arr = [arr]
+        out_shape = (len(arr),)+tuple(size)
+    elif arr.ndim==4:
+        out_shape = np.shape(arr)[:2]+tuple(size)
+    else:
+        raise ValueError("The input array to resize_stack should have either "
+                         "3 or 4 dimensions (if 4, it is treated as a stack "
+                         "of 3-dimensional volumes).")
+    out = np.zeros(out_shape, arr.dtype)
+    for volume in arr:
+        for i, arr_slice in enumerate(volume):
+            out[i] = transform.resize(arr_slice,
+                                      output_shape=size,
+                                      mode='constant',
+                                      cval=0,
+                                      clip=True,
+                                      preserve_range=True)
     return out
+
+class consecutive_slice_view(delayed_view):
+    """
+    A modified version of delayed_view which returns a block including 
+    num_consecutive slices above and num_consecutive slices below any 
+    requested slice (indexed along axis 0).
+    
+    For example, with num_consecutive=1, when indexing into array A with shape
+    (100,50,50), A[25] would return a slice of shape (3, 50, 50) and A[5:10]
+    would return a block with shape (5, 3, 50, 50).
+    """
+    def __init__(self, *args, num_consecutive, **kwargs):
+        self.num_consecutive = num_consecutive
+        super(consecutive_slice_view, self).__init__(*args, **kwargs)
+        
+    def _get_element(self, int_key, key_remainder=None):
+        if not isinstance(int_key, (int, np.integer)):
+            raise IndexError("cannot index with {}".format(type(int_key)))
+        idx = self.arr_indices[int_key]
+        if key_remainder is not None:
+            idx = (idx,)+key_remainder
+        idx = int(idx)  # Some libraries don't like np.integer
+        n = self.num_consecutive
+        return self.arr[idx-n:idx+n+1]
+    
+    def _get_block(self, values, key_remainder=None):
+        item_block = None
+        for i, v in enumerate(values):
+            # Lists in the aggregate key index in tandem;
+            # so, index into those lists (the first list is `values`)
+            v_key_remainder = key_remainder
+            if isinstance(values, tuple) or isinstance(values, list):
+                if key_remainder is not None:
+                    broadcasted_key_remainder = ()
+                    for k in key_remainder:
+                        if hasattr(k, '__len__') and len(k)==np.size(k):
+                            broadcasted_key_remainder += (k[i],)
+                        else:
+                            broadcasted_key_remainder += (k,)
+                    v_key_remainder = broadcasted_key_remainder
+            
+            # Make a single read at an integer index of axis 0
+            elem = self._get_element(v, v_key_remainder)
+            if item_block is None:
+                item_block = np.zeros((len(values),2*self.num_consecutive+1)\
+                                      +elem.shape, self.dtype)
+            item_block[i] = elem
+        return item_block
 
 def data_generator(data_path, volume_indices, batch_size,
                    nb_io_workers=1, nb_proc_workers=0,
                    shuffle=False, loop_forever=False, downscale=False,
                    transform_kwargs=None, data_flow_kwargs=None,
-                   align_intensity=False, rng=None):
+                   align_intensity=False, num_consecutive=None, rng=None):
+    """
+    Open data files, wrap data for access, and set up proprocessing; then,
+    initialize the generic data_flow.
+    """
+    
     if rng is None:
         rng = np.random.RandomState()
     
@@ -42,6 +110,11 @@ def data_generator(data_path, volume_indices, batch_size,
         segmentations.append(subgroup['segmentation'])
     msa_vol = multi_source_array(source_list=volumes, shuffle=False)
     msa_seg = multi_source_array(source_list=segmentations, shuffle=False)
+    if num_consecutive is not None:
+        msa_vol = consecutive_slice_view(msa_vol,
+                                         num_consecutive=num_consecutive)
+        msa_seg = consecutive_slice_view(msa_seg,
+                                         num_consecutive=num_consecutive)
     
     # Function to rescale the data and do data augmentation, if requested
     def preprocessor(batch):
@@ -52,11 +125,11 @@ def data_generator(data_path, volume_indices, batch_size,
         if downscale:
             b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
             b1 = resize_stack(b1, size=(256, 256), interp='nearest')
-        b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
         if transform_kwargs is not None:
             for i in range(len(b0)):
                 x, y = random_transform(b0[i], b1[i], **transform_kwargs)
                 b0[i], b1[i] = x, y
+        b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
         # standardize
         b0 /= 255.0
         b0 = np.clip(b0, -2.0, 2.0)
@@ -77,6 +150,9 @@ def data_generator(data_path, volume_indices, batch_size,
 
 
 def repeat_flow(flow, num_outputs):
+    """
+    Return a tuple with the ground truth repeated a custom number of times.
+    """
     for batch in flow:
         if num_outputs==1:
             yield batch
