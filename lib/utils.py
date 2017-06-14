@@ -14,24 +14,14 @@ def resize_stack(arr, size, interp='bilinear'):
     Resize each slice (indexed at dimension 0) of a 3D volume or of each 3D
     volume in a stack of volumes.
     """
-    if arr.ndim==3:
-        arr = [arr]
-        out_shape = (len(arr),)+tuple(size)
-    elif arr.ndim==4:
-        out_shape = np.shape(arr)[:2]+tuple(size)
-    else:
-        raise ValueError("The input array to resize_stack should have either "
-                         "3 or 4 dimensions (if 4, it is treated as a stack "
-                         "of 3-dimensional volumes).")
-    out = np.zeros(out_shape, arr.dtype)
-    for volume in arr:
-        for i, arr_slice in enumerate(volume):
-            out[i] = transform.resize(arr_slice,
-                                      output_shape=size,
-                                      mode='constant',
-                                      cval=0,
-                                      clip=True,
-                                      preserve_range=True)
+    out = np.zeros(arr.shape[:-2]+size, dtype=arr.dtype)
+    for idx in np.ndindex(arr.shape[:-2]):
+        out[idx] = transform.resize(arr[idx],
+                                    output_shape=size,
+                                    mode='constant',
+                                    cval=0,
+                                    clip=True,
+                                    preserve_range=True)
     return out
 
 class consecutive_slice_view(delayed_view):
@@ -126,9 +116,9 @@ def data_generator(data_path, volume_indices, batch_size,
             b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
             b1 = resize_stack(b1, size=(256, 256), interp='nearest')
         if transform_kwargs is not None:
-            for i in range(len(b0)):
-                x, y = random_transform(b0[i], b1[i], **transform_kwargs)
-                b0[i], b1[i] = x, y
+            for idx in np.ndindex(b0.shape[:-3]):
+                x, y = random_transform(b0[idx], b1[idx], **transform_kwargs)
+                b0[idx], b1[idx] = x, y
         b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
         # standardize
         b0 /= 255.0

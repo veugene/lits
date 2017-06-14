@@ -107,7 +107,6 @@ def _shortcut(input, residual, subsample, upsample, weight_decay=None,
                                     else output_shape[-1]//2
             return tuple(output_shape)
         if ndim==2:
-            print("WARNING: ndim is 2 in _shortcut")
             shortcut = Lambda(lambda x: x[:,:, ::2, ::2],
                               output_shape=downsample_output_shape)(shortcut)
         elif ndim==3:
