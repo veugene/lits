@@ -1,16 +1,17 @@
 import sys
 sys.path.append("..")
 from collections import OrderedDict
-from lib.hax.thick_blocks import (bottleneck,
-                                  basic_block,
-                                  basic_block_mp)
+from lib.blocks import (bottleneck,
+                        basic_block,
+                        basic_block_mp)
 from lib.train import run
+from lib.normalization_layers import LayerNormalization
 import os
 
 
 general_settings = OrderedDict((
     ('results_dir', "/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "stage1/3D/102"),
+    ('save_subdir', "layer_norm/stage1/001"),
     ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
@@ -22,7 +23,7 @@ general_settings = OrderedDict((
     ))
 
 model_kwargs = OrderedDict((
-    ('input_shape', (1, 3, 256, 256)),
+    ('input_shape', (1, 256, 256)),
     ('num_classes', 1),
     ('num_init_blocks', 2),
     ('num_main_blocks', 3),
@@ -31,12 +32,11 @@ model_kwargs = OrderedDict((
     ('num_cycles', 1),
     ('weight_decay', 0.0005), 
     ('dropout', 0.05),
-    ('batch_norm', True),
+    ('normalization', LayerNormalization),
     ('mainblock', basic_block),
     ('initblock', basic_block_mp),
-    ('bn_kwargs', {'momentum': 0.9,
-                   'scale': True,
-                   'center': True}),
+    ('norm_kwargs', {'scale': True,
+                     'center': True}),
     ('cycles_share_weights', True),
     ('num_residuals', 1),
     ('num_first_conv', 1),
@@ -45,15 +45,15 @@ model_kwargs = OrderedDict((
     ('num_outputs', 2),
     ('init', 'he_normal'),
     ('two_levels', True),
-    ('ndim', 3)
+    ('ndim', 2)
     ))
 
 data_gen_kwargs = OrderedDict((
-    ('data_path', "/store/data/lits_challenge/sorted/data_liver.zarr"),
+    ('data_path', "/store/Data/lits_challenge/sorted/data_liver.zarr"),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
     ('downscale', True),
-    ('num_consecutive', 1)
+    ('num_consecutive', None)
     ))
 
 data_augmentation_kwargs = OrderedDict((

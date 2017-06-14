@@ -47,11 +47,11 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    main_block_depth, input_num_filters, num_cycles=1,
                    preprocessor_network=None, postprocessor_network=None,
                    mainblock=None, initblock=None, dropout=0.,
-                   batch_norm=True, weight_decay=None, bn_kwargs=None,
-                   init='he_normal', ndim=2, cycles_share_weights=True,
-                   num_residuals=1, num_first_conv=1, num_final_conv=1,
-                   num_classifier=1, num_outputs=1,
-                   use_first_conv=True, use_final_conv=True):
+                   normalization=BatchNormalization, weight_decay=None,
+                   norm_kwargs=None, init='he_normal', ndim=2,
+                   cycles_share_weights=True, num_residuals=1,
+                   num_first_conv=1, num_final_conv=1, num_classifier=1,
+                   num_outputs=1, use_first_conv=True, use_final_conv=True):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -74,9 +74,10 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     mainblock : a layer defining the mainblock (bottleneck by default).
     initblock : a layer defining the initblock (basic_block_mp by default).
     dropout : the dropout probability, introduced in every block.
-    batch_norm : enable or disable batch normalization.
+    normalization : The normalization to apply to layers (by default: batch
+        normalization). If None, no normalization is applied.
     weight_decay : the weight decay (L2 penalty) used in every convolution.
-    bn_kwargs : keyword arguments to pass to batch norm layers.
+    norm_kwargs : keyword arguments to pass to batch norm layers.
     init : string or function specifying the initializer for layers.
     ndim : the spatial dimensionality of the input and output (2 or 3)
     cycles_share_weights : share network weights across cycles.
@@ -167,11 +168,11 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     'dropout': dropout,
                     'weight_decay': weight_decay,
                     'num_residuals': num_residuals,
-                    'bn_kwargs': bn_kwargs,
+                    'norm_kwargs': norm_kwargs,
                     'init': init,
                     'ndim': ndim}
-    if bn_kwargs is None:
-        bn_kwargs = {}
+    if norm_kwargs is None:
+        norm_kwargs = {}
     
     # INPUT
     input = Input(shape=input_shape)
@@ -192,9 +193,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         tensors.append({'down': {}, 'up': {}, 'across': {}})
         blocks.append({'down': {}, 'up': {}, 'across': {}})
         skips.append({'down': {}, 'up': {}, 'across': {}})
-        
-        # On the down path, batch norm is only used for the first cycle.
-        bn_down = batch_norm if cycle==0 else False
         
         # First convolution
         if cycle > 0:
@@ -242,7 +240,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             repetitions=1,
                                             subsample=True,
                                             upsample=False,
-                                            batch_norm=bn_down,
+                                            normalization=normalization,
                                             name='d'+str(depth),
                                             **block_kwargs)
                 block = make_block(block_func, x)
@@ -267,7 +265,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             repetitions=get_repetitions(b),
                                             subsample=True,
                                             upsample=False,
-                                            batch_norm=bn_down,
+                                            normalization=normalization,
                                             name='d'+str(depth),
                                             **block_kwargs)
                 block = make_block(block_func, x)
@@ -291,7 +289,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                   repetitions=get_repetitions(num_main_blocks),
                                   subsample=True,
                                   upsample=True,
-                                  batch_norm=bn_down,
+                                  normalization=normalization,
                                   name='a',
                                   **block_kwargs)
             block = make_block(block_func, x)
@@ -299,9 +297,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         blocks[cycle]['across'][0] = block
         tensors[cycle]['across'][0] = x
         print("Cycle {} - ACROSS: {}".format(cycle, x._keras_shape))
-
-        # On the up path, batch norm only in the last cycle.
-        bn_up = batch_norm if cycle==num_cycles-1 else False
 
         # UP (resnet blocks)
         for b in range(num_main_blocks-1, -1, -1):
@@ -318,7 +313,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             repetitions=get_repetitions(b),
                                             subsample=False,
                                             upsample=True,
-                                            batch_norm=bn_up,
+                                            normalization=normalization,
                                             name='u'+str(depth),
                                             **block_kwargs)
                 block = make_block(block_func, x)
@@ -342,7 +337,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                             repetitions=1,
                                             subsample=False,
                                             upsample=True,
-                                            batch_norm=bn_up,
+                                            normalization=normalization,
                                             name='u'+str(depth),
                                             **block_kwargs)
                 block = make_block(block_func, x)
@@ -368,9 +363,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                       kernel_regularizer=_l2(weight_decay),
                                       
                                         name=_unique('final_conv_'+str(i)))(x)
-                    out = BatchNormalization(axis=1,
-                                             name=_unique('final_bn_'+str(i)),
-                                            **bn_kwargs)(out)
+                    if normalization is not None:
+                        out = normalization(name=_unique('final_bn_'+str(i)),
+                                            **norm_kwargs)(out)
                     out = Activation('relu')(out)
                     outputs.append(out)
                 if len(outputs)>1:
