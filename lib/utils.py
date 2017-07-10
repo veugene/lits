@@ -75,8 +75,7 @@ class consecutive_slice_view(delayed_view):
             # Make a single read at an integer index of axis 0
             elem = self._get_element(v, v_key_remainder)
             if item_block is None:
-                item_block = np.zeros((len(values),2*self.num_consecutive+1)\
-                                      +elem.shape, self.dtype)
+                item_block = np.zeros((len(values),)+elem.shape, self.dtype)
             item_block[i] = elem
         return item_block
 
