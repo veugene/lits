@@ -18,6 +18,7 @@ from keras.optimizers import (RMSprop,
                               nadam,
                               adam,
                               SGD)
+from keras.losses import mean_squared_error
 from keras import backend as K
 import keras
 
@@ -35,8 +36,9 @@ from .utils import (data_generator,
 def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                   optimizer, save_path, volume_indices, data_gen_kwargs,
                   data_augmentation_kwargs=None, learning_rate=0.001,
-                  num_outputs=1, save_every=0, mask_to_liver=False,
-                  show_model=True, liver_only=False):
+                  num_outputs=1, adversarial=False, adv_weight=0.2,
+                  save_every=0, mask_to_liver=False, show_model=True,
+                  liver_only=False):
     
     if data_augmentation_kwargs is None:
         data_augmentation_kwargs = {}
@@ -53,6 +55,9 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
     else:
         lesion_output = None
         liver_output = 'output_0'
+        
+    if adversarial and not num_outputs==2:
+        print("num_outputs must be 2 when adversarial is True")
     
     '''
     Data generators for training and validation sets
@@ -78,6 +83,7 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                                         loop_forever=False,
                                         transform_kwargs=None,
                                         **data_gen_kwargs)
+    
     
     '''
     Metrics
@@ -221,12 +227,22 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     if not hasattr(model, 'optimizer'):
+        def loss(loss_func, weight):
+            def f(y_true, y_pred):
+                return loss_func(y_true, y_pred)*weight
+            return f
         masked_class = 0 if mask_to_liver else None
         losses = {}
         if lesion_output:
-            losses[lesion_output] = dice_loss(2, masked_class=masked_class)
+            losses[lesion_output] = loss(dice_loss(2, masked_class=masked_class),
+                                         1.-adv_weight)
         if num_outputs==2 or lesion_output is None:
-            losses[liver_output] = dice_loss([1, 2])
+            losses[liver_output] = loss(dice_loss([1, 2]), 1.-adv_weight)
+        if adversarial:
+            losses['d_out_0'] = loss(mean_squared_error, adv_weight)
+            losses['d_out_1'] = loss(mean_squared_error, adv_weight)
+            losses['d_out_0_real'] = loss(mean_squared_error, adv_weight)
+            losses['d_out_1_real'] = loss(mean_squared_error, adv_weight)
         model.compile(loss=losses, optimizer=optimizer, metrics=metrics)
         
     '''
@@ -240,18 +256,27 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
     return model, callbacks, gen
     
     
-def train(model, num_epochs, num_outputs, initial_epoch=0, **kwargs):
+def train(model, num_epochs, num_outputs,
+          adversarial=False, adversarial_weight=0.2, initial_epoch=0,
+          **kwargs):
     model, callbacks, gen = prepare_model(model=model,
                                           num_outputs=num_outputs,
+                                          adversarial=adversarial,
+                                          adv_weight=adversarial_weight,
                                           **kwargs)
-    gen_train_flow = repeat_flow(gen['train'].flow(), num_outputs=num_outputs)
-    gen_valid_flow = repeat_flow(gen['valid'].flow(), num_outputs=num_outputs)
+    
+    # Duplicate inputs and outputs (and add outputs) as necessary.
+    flow = {}
+    for key in gen:
+        flow[key] = repeat_flow(gen[key].flow(),
+                                num_outputs=num_outputs,
+                                adversarial=adversarial)
     
     print(' > Training the model...')
-    history = model.fit_generator(generator=gen_train_flow,
+    history = model.fit_generator(generator=flow['train'],
                                   steps_per_epoch=len(gen['train']),
                                   epochs=num_epochs,
-                                  validation_data=gen_valid_flow,
+                                  validation_data=flow['valid'],
                                   validation_steps=len(gen['valid']),
                                   callbacks=list(callbacks.values()),
                                   initial_epoch=initial_epoch)
@@ -387,6 +412,7 @@ def run(general_settings,
         data_gen_kwargs,
         data_augmentation_kwargs,
         train_kwargs,
+        discriminator_kwargs=None,
         loader_kwargs=None):
     
     # Set random seed
@@ -428,7 +454,12 @@ def run(general_settings,
         print("#### {} ####".format(name))
         for key in d.keys():
             print(key, ":", d[key])
-        print("")  
+        print("")
+        
+    if 'adversarial' in model_kwargs:
+        adversarial = model_kwargs['adversarial']
+    else:
+        adversarial = False
 
     '''
     Set up experiment directory
@@ -488,7 +519,11 @@ def run(general_settings,
     '''
     if model is None:
         print('\n > Building model...')
-        model = assemble_model(**model_kwargs)
+        if discriminator_kwargs is None:
+            model = assemble_model(**model_kwargs)
+        else:
+            model = assemble_model(discriminator_kwargs=discriminator_kwargs,
+                                   **model_kwargs)
         print("   number of parameters : ", model.count_params())
 
         '''
@@ -537,4 +572,5 @@ def run(general_settings,
           data_gen_kwargs=data_gen_kwargs,
           data_augmentation_kwargs=data_augmentation_kwargs,
           initial_epoch=initial_epoch,
+          adversarial=adversarial,
           **train_kwargs)

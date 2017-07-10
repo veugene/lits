@@ -1,20 +1,91 @@
+import copy
 from keras.layers import (Input,
                           Activation,
                           Permute,
-                          BatchNormalization)
+                          BatchNormalization,
+                          Lambda,
+                          Dense)
 from keras.layers.merge import concatenate as merge_concatenate
-from .blocks import Convolution
 from keras.models import Model
-import copy
+from keras import backend as K
 from .model import assemble_model as assemble_cycled_model
 from .model import _l2, _unique, _softmax
 from .callbacks import Dice
 from .loss import dice_loss
+from .blocks import (Convolution,
+                     bottleneck,
+                     basic_block,
+                     basic_block_mp,
+                     residual_block)
+
+def assemble_cnn(input_shape, num_classes, num_init_blocks, num_main_blocks,
+                 main_block_depth, input_num_filters, mainblock=None, 
+                 initblock=None, dropout=0., normalization=BatchNormalization,
+                 weight_decay=None, norm_kwargs=None, init='he_normal',
+                 output_activation='linear', ndim=2):
+    
+    block_kwargs = {'skip': True,
+                    'dropout': dropout,
+                    'weight_decay': weight_decay,
+                    'norm_kwargs': norm_kwargs,
+                    'init': init,
+                    'ndim': ndim}
+    
+    '''
+    Returns the depth of a mainblock for a given pooling level.
+    '''
+    def get_repetitions(level):
+        if hasattr(main_block_depth, '__len__'):
+            return main_block_depth[level]
+        return main_block_depth
+        
+    input = x = Input(shape=input_shape)
+    
+    # UP (initial subsampling blocks)
+    for b in range(num_init_blocks):
+        x = residual_block(initblock,
+                           filters=input_num_filters,
+                           repetitions=1,
+                           subsample=True,
+                           upsample=False,
+                           normalization=normalization,
+                           **block_kwargs)(x)
+        print("Discriminator - INIT UP {}: {}".format(b, x._keras_shape))
+    
+    # UP (resnet blocks)
+    for b in range(num_main_blocks):
+        x = residual_block(mainblock,
+                           filters=input_num_filters*(2**b),
+                           repetitions=get_repetitions(b),
+                           subsample=True,
+                           upsample=False,
+                           normalization=normalization,
+                           **block_kwargs)(x)
+        print("Discriminator - MAIN UP {}: {}".format(b, x._keras_shape))
+        
+    # Output
+    def GlobalAveragePooling2D(input):
+        return Lambda(function=lambda x: K.mean(x.flatten(3), axis=2),
+                      output_shape=lambda s: s[:2])(input)
+    avgpool = GlobalAveragePooling2D(x)
+    output = Dense(num_classes, kernel_initializer=init, activation='linear',
+                   kernel_regularizer=_l2(weight_decay))(avgpool)
+    output = Activation(output_activation)(output)
+    
+    # Model
+    model = Model(inputs=input, outputs=output)
+    
+    return model
+                 
 
 def assemble_model(two_levels=False, num_residuals_bottom=None,
                    y_net=False, y_net_liver_path=None, y_net_lesion_path=None,
                    y_net_freeze_liver=True, y_net_freeze_lesion=True,
-                   y_net_extra_input=False, **model_kwargs):
+                   y_net_extra_input=False, adversarial=False,
+                   discriminator_kwargs=None, **model_kwargs):
+    
+    if discriminator_kwargs is None:
+        discriminator_kwargs = {}
         
     if two_levels:
         assert(not y_net)
@@ -47,13 +118,13 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         liver_output = Convolution(filters=1, kernel_size=1,
                           ndim=model_kwargs['ndim'],
                           activation='linear',
-                          kernel_regularizer=_l2(model_kwargs['weight_decay']),
-                          name='classifier_conv_1')(liver_output_pre)
+                          kernel_regularizer=_l2(model_kwargs['weight_decay']))
+        liver_output = liver_output(liver_output_pre)
         if model_kwargs['ndim']==2:
             liver_output = Permute((2,3,1))(liver_output)
         else:
             liver_output = Permute((2,3,4,1))(liver_output)
-        liver_output = Activation('sigmoid',name='sigmoid_1')(liver_output)
+        liver_output = Activation('sigmoid', name='sigmoid_1')(liver_output)
         if model_kwargs['ndim']==2:
             liver_output_layer = Permute((3,1,2))
         else:
@@ -61,11 +132,47 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         liver_output_layer.name = 'output_1'
         liver_output = liver_output_layer(liver_output)
         
-        # Create aggregate model
+        # Lesion classifier output
         model_lesion.name = 'output_0'
         lesion_output = model_lesion(lesion_input)
-        model = Model(inputs=model_input, outputs=[lesion_output,
-                                                   liver_output])
+        
+        # Create discriminators
+        if adversarial:
+            # Lesion descriminator
+            in_seg_lesion = Input(input_shape)
+            in_lesion_gen = merge_concatenate([lesion_output, model_input],
+                                              axis=1)
+            in_lesion_real = merge_concatenate([in_seg_lesion, model_input],
+                                               axis=1)
+            lesion_discriminator = assemble_cnn(**discriminator_kwargs)
+            lesion_discriminator.name = 'd_out_0'
+            out_desc_lesion_gen = lesion_discriminator(in_lesion_gen)
+            out_desc_lesion_real = Activation('linear', name='d_out_0_real')(\
+                                          lesion_discriminator(in_lesion_real))
+            
+            # Liver descriminator
+            in_seg_liver = Input(input_shape)
+            in_liver_gen = merge_concatenate([liver_output, model_input],
+                                             axis=1)
+            in_liver_real = merge_concatenate([in_seg_liver, model_input],
+                                              axis=1)
+            liver_discriminator = assemble_cnn(**discriminator_kwargs)
+            liver_discriminator.name = 'd_out_1'
+            out_desc_liver_gen = liver_discriminator(in_liver_gen)
+            out_desc_liver_real = Activation('linear', name='d_out_1_real')(\
+                                            liver_discriminator(in_liver_real))
+        
+        # Create aggregate model
+        if adversarial:
+            model = Model( \
+                inputs=[model_input, in_seg_lesion, in_seg_liver],
+                outputs=[lesion_output, liver_output,
+                         out_desc_lesion_gen, out_desc_liver_gen,
+                         out_desc_lesion_real, out_desc_liver_real])
+        else:
+            model = Model(inputs=model_input,
+                          outputs=[lesion_output, liver_output])
+        
         return model
     
     elif y_net:

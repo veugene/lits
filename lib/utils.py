@@ -146,16 +146,33 @@ def data_generator(data_path, volume_indices, batch_size,
     return data_gen
 
 
-def repeat_flow(flow, num_outputs):
+def repeat_flow(flow, num_outputs, adversarial=False):
     """
     Return a tuple with the ground truth repeated a custom number of times.
     """
     for batch in flow:
-        if num_outputs==1:
-            yield batch
-        else:
-            yield (batch[0], [batch[1] for i in range(num_outputs)])
-
+        inputs = [batch[0]]
+        outputs = []
+        for i in range(num_outputs):
+            if adversarial:
+                # Discriminator inputs.
+                inputs.append(batch[1])
+            # All model outputs.
+            outputs.append(batch[1])
+        
+        # Discriminator outputs.
+        if adversarial:
+            bs = len(batch[0])
+            outputs.extend([np.zeros(bs, dtype=np.int32)] * num_outputs)
+            outputs.extend([np.ones(bs, dtype=np.int32)] * num_outputs)
+    
+        if len(inputs)==1:
+            inputs = inputs[0]
+        if len(outputs)==1:
+            outputs = outputs[0]
+        
+        yield (inputs, outputs)
+        
 
 def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
                             layers_to_not_freeze=None, freeze_mask=None,
