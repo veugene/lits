@@ -46,7 +46,15 @@ class consecutive_slice_view(delayed_view):
             idx = (idx,)+key_remainder
         idx = int(idx)  # Some libraries don't like np.integer
         n = self.num_consecutive
-        return self.arr[idx-n:idx+n+1]
+        if idx-n:
+            elem = self.arr[idx-n:idx+n+1]
+            ret_arr = np.zeros((2*n+1,)+np.shape(elem)[1:], dtype=self.dtype)
+            ret_arr[:len(elem)] = elem
+        else:
+            elem = self.arr[0:idx+n+1]
+            ret_arr = np.zeros((2*n+1,)+np.shape(elem)[1:], dtype=self.dtype)
+            ret_arr[-len(elem):] = elem
+        return ret_arr
     
     def _get_block(self, values, key_remainder=None):
         item_block = None
