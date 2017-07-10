@@ -128,7 +128,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     
     If weight sharing is enabled, reuse old convolutions.
     '''
-    def merge_into(x, into, skips, cycle, direction, depth, bn_status):
+    def merge_into(x, into, skips, cycle, direction, depth):
         if x._keras_shape[1] != into._keras_shape[1]:
             if cycles_share_weights and depth in skips[cycle-1][direction]:
                 conv_layer = skips[cycle-1][direction][depth]
@@ -145,10 +145,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             x = conv_layer(x)
         
         out = merge_add([x, into])
-        if bn_status==False:
-            # When batch norm is disabled, halve the merged values since it is
-            # not a residual that is being summed in on a long skip connection.
-            out = Lambda(lambda x: x/2., output_shape=lambda x:x)(out)
         return out
     
     '''
@@ -197,8 +193,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         # First convolution
         if cycle > 0:
             x = merge_into(x, tensors[cycle-1]['up'][0], skips=skips,
-                           cycle=cycle, direction='down', depth=0,
-                           bn_status=bn_down)
+                           cycle=cycle, direction='down', depth=0)
         if cycles_share_weights and cycle > 1:
             block = blocks[cycle-1]['down'][0]
         else:
@@ -230,8 +225,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             depth = b+1
             if cycle > 0:
                 x = merge_into(x, tensors[cycle-1]['up'][depth], skips=skips,
-                               cycle=cycle, direction='down', depth=depth,
-                               bn_status=bn_down)
+                               cycle=cycle, direction='down', depth=depth)
             if cycles_share_weights and cycle > 1:
                 block = blocks[cycle-1]['down'][depth]
             else:
@@ -255,8 +249,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             depth = b+1+num_init_blocks
             if cycle > 0:
                 x = merge_into(x, tensors[cycle-1]['up'][depth], skips=skips,
-                               cycle=cycle, direction='down', depth=depth,
-                               bn_status=bn_down)
+                               cycle=cycle, direction='down', depth=depth)
             if cycles_share_weights and cycle > 1:
                 block = blocks[cycle-1]['down'][depth]
             else:
@@ -278,8 +271,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         # ACROSS
         if cycle > 0:
             x = merge_into(x, tensors[cycle-1]['across'][0], skips=skips,
-                           cycle=cycle, direction='across', depth=0,
-                           bn_status=bn_down)
+                           cycle=cycle, direction='across', depth=0)
         if cycles_share_weights and cycle > 1:
             block = blocks[cycle-1]['across'][0]
         else:
@@ -302,8 +294,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         for b in range(num_main_blocks-1, -1, -1):
             depth = b+1+num_init_blocks
             x = merge_into(x, tensors[cycle]['down'][depth], skips=skips,
-                           cycle=cycle, direction='up', depth=depth,
-                           bn_status=bn_up)
+                           cycle=cycle, direction='up', depth=depth)
             if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
                 block = blocks[cycle-1]['up'][depth]
             else:
@@ -327,8 +318,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         for b in range(num_init_blocks-1, -1, -1):
             depth = b+1
             x = merge_into(x, tensors[cycle]['down'][depth], skips=skips,
-                           cycle=cycle, direction='up', depth=depth,
-                           bn_status=bn_up)
+                           cycle=cycle, direction='up', depth=depth)
             if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
                 block = blocks[cycle-1]['up'][depth]
             else:
@@ -349,8 +339,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             
         # Final convolution.
         x = merge_into(x, tensors[cycle]['down'][0], skips=skips,
-                       cycle=cycle, direction='up', depth=0,
-                       bn_status=bn_up)
+                       cycle=cycle, direction='up', depth=0)
         if cycles_share_weights and cycle > 0 and cycle < num_cycles-1:
             block = blocks[cycle-1]['up'][0]
         else:
@@ -383,8 +372,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         if cycle > 0:
             # Merge preclassifier outputs across all cycles.
             x = merge_into(x, tensors[cycle-1]['up'][0], skips=skips,
-                           cycle=cycle, direction='up', depth=-1,
-                           bn_status=bn_up)
+                           cycle=cycle, direction='up', depth=-1)
         print("Cycle {} - FIRST UP: {}".format(cycle, x._keras_shape))
             
     # Postprocessing
