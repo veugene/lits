@@ -353,7 +353,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                       
                                         name=_unique('final_conv_'+str(i)))(x)
                     if normalization is not None:
-                        out = normalization(name=_unique('final_bn_'+str(i)),
+                        out = normalization(name=_unique('final_norm_'+str(i)),
                                             **norm_kwargs)(out)
                     out = Activation('relu')(out)
                     outputs.append(out)

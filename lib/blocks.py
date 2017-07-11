@@ -57,11 +57,11 @@ def _get_unique_name(name, prefix=None):
     return name
 
 
-# Helper to build a BN -> relu -> conv block
+# Helper to build a norm -> relu -> conv block
 # This is an improved scheme proposed in http://arxiv.org/pdf/1603.05027v2.pdf
-def _bn_relu_conv(filters, kernel_size, subsample=False, upsample=False,
-                  normalization=BatchNormalization, weight_decay=None, 
-                  norm_kwargs=None, init='he_normal', ndim=2, name=None):
+def _norm_relu_conv(filters, kernel_size, subsample=False, upsample=False,
+                    normalization=BatchNormalization, weight_decay=None, 
+                    norm_kwargs=None, init='he_normal', ndim=2, name=None):
     if norm_kwargs is None:
         norm_kwargs = {}
     name = _get_unique_name('', name)
@@ -69,7 +69,7 @@ def _bn_relu_conv(filters, kernel_size, subsample=False, upsample=False,
     def f(input):
         processed = input
         if normalization is not None:
-            processed = normalization(name=name+'_bn',
+            processed = normalization(name=name+'_norm',
                                       **norm_kwargs)(processed)
         processed = Activation('relu')(processed)
         stride = 1
@@ -141,32 +141,32 @@ def bottleneck(filters, subsample=False, upsample=False, skip=True,
     def f(input):
         residuals = []
         for i in range(num_residuals):
-            residual = _bn_relu_conv(filters,
-                                     kernel_size=1,
-                                     subsample=subsample,
-                                     normalization=normalization,
-                                     weight_decay=weight_decay,
-                                     norm_kwargs=norm_kwargs,
-                                     init=init,
-                                     ndim=ndim,
-                                     name=name)(input)
-            residual = _bn_relu_conv(filters,
-                                     kernel_size=3,
-                                     normalization=normalization,
-                                     weight_decay=weight_decay,
-                                     norm_kwargs=norm_kwargs,
-                                     init=init,
-                                     ndim=ndim,
-                                     name=name)(residual)
-            residual = _bn_relu_conv(filters * 4,
-                                     kernel_size=1,
-                                     upsample=upsample,
-                                     normalization=normalization,
-                                     weight_decay=weight_decay,
-                                     norm_kwargs=norm_kwargs,
-                                     init=init,
-                                     ndim=ndim,
-                                     name=name)(residual)
+            residual = _norm_relu_conv(filters,
+                                       kernel_size=1,
+                                       subsample=subsample,
+                                       normalization=normalization,
+                                       weight_decay=weight_decay,
+                                       norm_kwargs=norm_kwargs,
+                                       init=init,
+                                       ndim=ndim,
+                                       name=name)(input)
+            residual = _norm_relu_conv(filters,
+                                       kernel_size=3,
+                                       normalization=normalization,
+                                       weight_decay=weight_decay,
+                                       norm_kwargs=norm_kwargs,
+                                       init=init,
+                                       ndim=ndim,
+                                       name=name)(residual)
+            residual = _norm_relu_conv(filters * 4,
+                                       kernel_size=1,
+                                       upsample=upsample,
+                                       normalization=normalization,
+                                       weight_decay=weight_decay,
+                                       norm_kwargs=norm_kwargs,
+                                       init=init,
+                                       ndim=ndim,
+                                       name=name)(residual)
             if dropout > 0:
                 residual = Dropout(dropout)(residual)
             residiuals.append(residual)
@@ -196,26 +196,26 @@ def basic_block(filters, subsample=False, upsample=False, skip=True,
     def f(input):
         residuals = []
         for i in range(num_residuals):
-            residual = _bn_relu_conv(filters,
-                                     kernel_size=3,
-                                     subsample=subsample,
-                                     normalization=normalization,
-                                     weight_decay=weight_decay,
-                                     norm_kwargs=norm_kwargs,
-                                     init=init,
-                                     ndim=ndim,
-                                     name=name)(input)
+            residual = _norm_relu_conv(filters,
+                                       kernel_size=3,
+                                       subsample=subsample,
+                                       normalization=normalization,
+                                       weight_decay=weight_decay,
+                                       norm_kwargs=norm_kwargs,
+                                       init=init,
+                                       ndim=ndim,
+                                       name=name)(input)
             if dropout > 0:
                 residual = Dropout(dropout)(residual)
-            residual = _bn_relu_conv(filters,
-                                     kernel_size=3,
-                                     upsample=upsample,
-                                     normalization=normalization,
-                                     weight_decay=weight_decay,
-                                     norm_kwargs=norm_kwargs,
-                                     init=init,
-                                     ndim=ndim,
-                                     name=name)(residual)
+            residual = _norm_relu_conv(filters,
+                                       kernel_size=3,
+                                       upsample=upsample,
+                                       normalization=normalization,
+                                       weight_decay=weight_decay,
+                                       norm_kwargs=norm_kwargs,
+                                       init=init,
+                                       ndim=ndim,
+                                       name=name)(residual)
             residuals.append(residual)
         
         if len(residuals)>1:
@@ -265,13 +265,13 @@ def basic_block_mp(filters, subsample=False, upsample=False, skip=True,
     if norm_kwargs is None:
         norm_kwargs = {}
     name = _get_unique_name('basic_block_mp', prefix=name)
-        
+    
     def f(input):
         residuals = []
         for i in range(num_residuals):
             residual = input
             if normalization is not None:
-                residual = normalization(name=name+"_bn_"+str(i),
+                residual = normalization(name=name+"_norm_"+str(i),
                                          **norm_kwargs)(residual)
             residual = Activation('relu')(residual)
             if subsample:
