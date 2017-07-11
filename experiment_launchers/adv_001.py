@@ -53,7 +53,7 @@ model_kwargs = OrderedDict((
     ))
     
 discriminator_kwargs = OrderedDict((
-    ('input_shape', (1, 256, 256)),
+    ('input_shape', (2, 256, 256)),
     ('num_classes', 1),
     ('num_init_blocks', 2),
     ('num_main_blocks', 3),
@@ -116,7 +116,8 @@ train_kwargs = OrderedDict((
     ('show_model', False),
     ('save_every', 10),         # Save predictions every x epochs
     ('mask_to_liver', False),
-    ('liver_only', False)
+    ('liver_only', False),
+    ('adversarial_weight', 0.2)
     ))
 train_kwargs['num_outputs'] = model_kwargs['num_outputs']
 
