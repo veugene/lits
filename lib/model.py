@@ -46,10 +46,10 @@ def _unique(name):
 def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    main_block_depth, input_num_filters, num_cycles=1,
                    preprocessor_network=None, postprocessor_network=None,
-                   mainblock=None, initblock=None, dropout=0.,
-                   normalization=BatchNormalization, weight_decay=None,
-                   norm_kwargs=None, init='he_normal', ndim=2,
-                   cycles_share_weights=True, num_residuals=1,
+                   mainblock=None, initblock=None, nonlinearity='relu',
+                   dropout=0., normalization=BatchNormalization,
+                   weight_decay=None, norm_kwargs=None, init='he_normal',
+                   ndim=2, cycles_share_weights=True, num_residuals=1,
                    num_first_conv=1, num_final_conv=1, num_classifier=1,
                    num_outputs=1, use_first_conv=True, use_final_conv=True):
     """
@@ -73,6 +73,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
         to the classifier.
     mainblock : a layer defining the mainblock (bottleneck by default).
     initblock : a layer defining the initblock (basic_block_mp by default).
+    nonlinearity : string or function specifying/defining the nonlinearity.
     dropout : the dropout probability, introduced in every block.
     normalization : The normalization to apply to layers (by default: batch
         normalization). If None, no normalization is applied.
@@ -143,7 +144,6 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                          name=name)
             skips[cycle][direction][depth] = conv_layer
             x = conv_layer(x)
-        
         out = merge_add([x, into])
         return out
     
@@ -355,7 +355,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     if normalization is not None:
                         out = normalization(name=_unique('final_norm_'+str(i)),
                                             **norm_kwargs)(out)
-                    out = Activation('relu')(out)
+                    out = Activation(nonlinearity)(out)
                     outputs.append(out)
                 if len(outputs)>1:
                     out = merge_add(outputs)
