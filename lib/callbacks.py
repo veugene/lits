@@ -175,7 +175,8 @@ class SavePredictions(Callback):
                 s_pred_list = [self._process_slice(pred[i])]
             else:
                 for j in range(len(self.model.outputs)):
-                    s_pred_list.append(self._process_slice(pred[j][i]))
+                    if np.shape(pred[j][i])==np.shape(batch[1]):
+                        s_pred_list.append(self._process_slice(pred[j][i]))
             s_input = self._process_slice(batch[0][i])
             s_truth = self._process_slice(batch[1][i]/2.)
             out_image = np.concatenate([s_input]+s_pred_list+[s_truth], axis=1)
@@ -193,7 +194,11 @@ class SavePredictions(Callback):
         flow = self.data_gen.flow()
         for i in range(len(self.data_gen)):
             batch = next(flow)
-            out = self.model.predict_on_batch(batch[0])
+            if len(self.model.inputs) > 1:
+                inputs = [batch[0]]*len(self.model.inputs)
+            else:
+                inputs = batch[0]
+            out = self.model.predict_on_batch(inputs)
             self._save_image(out, batch, i, save_path)
 
 
@@ -237,11 +242,13 @@ class FileLogger(Callback):
         self.log_values = {}
 
     def on_batch_end(self, batch, logs={}):
-        batch_size = logs.get('size', 0)
         for k in self.params['metrics']:
             if k in logs:
                 self.log_values[k] = logs[k]
         self.write_log(self.log_values)
 
     def on_epoch_end(self, epoch, logs={}):
-        pass
+        for k in self.params['metrics']:
+            if k in logs:
+                self.log_values[k] = logs[k]
+        self.write_log(self.log_values)
