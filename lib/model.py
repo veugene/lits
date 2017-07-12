@@ -14,7 +14,8 @@ import numpy as np
 from .blocks import (bottleneck,
                      basic_block,
                      basic_block_mp,
-                     residual_block)
+                     residual_block,
+                     get_nonlinearity)
 
 
 def _l2(decay):
@@ -269,13 +270,14 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                                        x._keras_shape))
             
         # ACROSS
-        if cycle > 0:
-            x = merge_into(x, tensors[cycle-1]['across'][0], skips=skips,
-                           cycle=cycle, direction='across', depth=0)
-        if cycles_share_weights and cycle > 1:
-            block = blocks[cycle-1]['across'][0]
-        else:
-            block_func = residual_block( \
+        if num_main_blocks:
+            if cycle > 0:
+                x = merge_into(x, tensors[cycle-1]['across'][0], skips=skips,
+                               cycle=cycle, direction='across', depth=0)
+            if cycles_share_weights and cycle > 1:
+                block = blocks[cycle-1]['across'][0]
+            else:
+                block_func = residual_block( \
                                   mainblock,
                                   filters=input_num_filters*(2**b),
                                   repetitions=get_repetitions(num_main_blocks),
@@ -284,11 +286,11 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                   normalization=normalization,
                                   name='a',
                                   **block_kwargs)
-            block = make_block(block_func, x)
-        x = block(x)
-        blocks[cycle]['across'][0] = block
-        tensors[cycle]['across'][0] = x
-        print("Cycle {} - ACROSS: {}".format(cycle, x._keras_shape))
+                block = make_block(block_func, x)
+            x = block(x)
+            blocks[cycle]['across'][0] = block
+            tensors[cycle]['across'][0] = x
+            print("Cycle {} - ACROSS: {}".format(cycle, x._keras_shape))
 
         # UP (resnet blocks)
         for b in range(num_main_blocks-1, -1, -1):
@@ -350,12 +352,11 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                                       kernel_size=3, ndim=ndim,
                                       kernel_initializer=init, padding='same',
                                       kernel_regularizer=_l2(weight_decay),
-                                      
-                                        name=_unique('final_conv_'+str(i)))(x)
+                                      name=_unique('final_conv_'+str(i)))(x)
                     if normalization is not None:
                         out = normalization(name=_unique('final_norm_'+str(i)),
                                             **norm_kwargs)(out)
-                    out = Activation(nonlinearity)(out)
+                    out = get_nonlinearity(nonlinearity)(out)
                     outputs.append(out)
                 if len(outputs)>1:
                     out = merge_add(outputs)

@@ -100,17 +100,17 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         if num_residuals_bottom is not None:
             model_liver_kwargs['num_residuals'] = num_residuals_bottom
         model_liver = assemble_cycled_model(**model_liver_kwargs)
+        liver_output_pre = model_liver(model_input)
         
         # Assemble second model on top (lesion)
         model_lesion_kwargs = copy.copy(model_kwargs)
         model_lesion_kwargs['num_outputs'] = 1
         model_lesion_kwargs['input_shape'] = \
-                                    (model_kwargs['input_num_filters']+1,)\
+                                    (liver_output_pre._keras_shape[1]+1,)\
                                     +input_shape[1:]
         model_lesion = assemble_cycled_model(**model_lesion_kwargs)
         
         # Connect first model to second
-        liver_output_pre = model_liver(model_input)
         lesion_input = merge_concatenate([model_input, liver_output_pre], 
                                          axis=1)
         
@@ -118,7 +118,8 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         liver_output = Convolution(filters=1, kernel_size=1,
                           ndim=model_kwargs['ndim'],
                           activation='linear',
-                          kernel_regularizer=_l2(model_kwargs['weight_decay']))
+                          kernel_regularizer=_l2(model_kwargs['weight_decay']),
+                          name='classifier_conv_1')
         liver_output = liver_output(liver_output_pre)
         if model_kwargs['ndim']==2:
             liver_output = Permute((2,3,1))(liver_output)
