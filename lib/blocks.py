@@ -40,6 +40,15 @@ def UpSampling(*args, ndim=2, **kwargs):
         return UpSampling3D(*args, **kwargs)
     else:
         raise ValueError("ndim must be 2 or 3")
+    
+    
+"""
+Return a nonlinearity from the core library or return the provided function.
+"""
+def get_nonlinearity(nonlin):
+    if isinstance(nonlin, str):
+        return Activation(nonlin)
+    return nonlin()
 
 
 # Return a new instance of l2 regularizer, or return None
@@ -73,7 +82,7 @@ def _norm_relu_conv(filters, kernel_size, subsample=False, upsample=False,
         if normalization is not None:
             processed = normalization(name=name+'_norm',
                                       **norm_kwargs)(processed)
-        processed = Activation(nonlinearity)(processed)
+        processed = get_nonlinearity(nonlinearity)(processed)
         stride = 1
         if subsample:
             stride = 2
@@ -285,7 +294,7 @@ def basic_block_mp(filters, subsample=False, upsample=False, skip=True,
             if normalization is not None:
                 residual = normalization(name=name+"_norm_"+str(i),
                                          **norm_kwargs)(residual)
-            residual = Activation(nonlinearity)(residual)
+            residual = get_nonlinearity(nonlinearity)(residual)
             if subsample:
                 residual = MaxPooling(pool_size=2, ndim=ndim)(residual)
             residual = Convolution(filters=filters, kernel_size=3, 
