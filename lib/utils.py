@@ -209,6 +209,14 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
                     break
             wname = '_'.join(wname_parts)
             
+            # Rename 'bn' weights to 'norm' weights (to convert old models).
+            wname_parts = wname_load.split('_')
+            for i, part in enumerate(wname_parts):
+                if part.startswith('bn'):
+                    wname_parts[i] = 'norm'+part[2:]
+            wname = '_'.join(wname_parts)
+                
+            
             # Set weights
             
             ## TEMP
@@ -231,7 +239,13 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
                 used_names.append(wname)
                 if verbose:
                     print("Setting weights {}".format(wname))
-                weights_dict[wname].set_value(g[wname_load][...])
+                var = g[wname_load][...]
+                if weights_dict[wname].ndim!=var.ndim:
+                    # Load 2D into 3D
+                    var = np.repeat(np.expand_dims(var, axis=0),
+                                    repeats=weights_dict[wname].shape[0].eval(),
+                                    axis=0)
+                weights_dict[wname].set_value(var)
             else:
                 print("WARNING: {} not found in model (skipped)".format(wname))
 
