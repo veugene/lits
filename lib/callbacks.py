@@ -175,7 +175,7 @@ class SavePredictions(Callback):
                 s_pred_list = [self._process_slice(pred[i])]
             else:
                 for j in range(len(self.model.outputs)):
-                    if np.shape(pred[j][i])==np.shape(batch[1]):
+                    if np.shape(pred[j][i])==np.shape(batch[1][i]):
                         s_pred_list.append(self._process_slice(pred[j][i]))
             s_input = self._process_slice(batch[0][i])
             s_truth = self._process_slice(batch[1][i]/2.)
