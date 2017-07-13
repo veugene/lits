@@ -162,6 +162,8 @@ class SavePredictions(Callback):
         
     def _process_slice(self, s):
         s = np.squeeze(s).copy()
+        if s.ndim==3:
+            s = s[s.shape[0]//2]    # Central slice.
         s[s<0]=0
         s[s>1]=1
         s[0,0]=1
