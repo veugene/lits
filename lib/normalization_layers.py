@@ -2,7 +2,7 @@
 
 import keras
 from keras import backend as K
-from keras.layers import Layer, Dense, Conv2D
+from keras.layers import Layer, Dense, Conv2D, activations
 from keras.models import Model
 from keras.layers.wrappers import Wrapper
 from keras import initializers, regularizers, constraints
@@ -97,7 +97,7 @@ class WeightNorm(Wrapper):
             # in case they are defined
             self.layer.use_bias = False
             self.activation = self.layer.activation
-            self.layer.activation = None
+            self.layer.activation = activations.get('linear')
             self.layer.build(input_shape)
             self.layer.built = True
         W = self.layer.kernel
