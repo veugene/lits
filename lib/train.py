@@ -243,10 +243,12 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
         if num_outputs==2 or lesion_output is None:
             losses[liver_output] = loss(dice_loss([1, 2]), 1.-adv_weight)
         if adversarial:
-            losses['d_out_0'] = loss(mean_squared_error, adv_weight)
-            losses['d_out_1'] = loss(mean_squared_error, adv_weight)
-            losses['d_out_0_real'] = loss(mean_squared_error, adv_weight)
-            losses['d_out_1_real'] = loss(mean_squared_error, adv_weight)
+            losses['out_adv_0_d'] = loss(mean_squared_error, adv_weight)
+            losses['out_adv_1_d'] = loss(mean_squared_error, adv_weight)
+            losses['out_adv_0_g'] = loss(mean_squared_error, adv_weight)
+            losses['out_adv_1_g'] = loss(mean_squared_error, adv_weight)
+            losses['out_disc_0'] = loss(mean_squared_error, adv_weight)
+            losses['out_disc_1'] = loss(mean_squared_error, adv_weight)
         model.compile(loss=losses, optimizer=optimizer, metrics=metrics)
         
     '''

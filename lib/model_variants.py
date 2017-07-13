@@ -18,6 +18,7 @@ from .blocks import (Convolution,
                      basic_block_mp,
                      residual_block)
 
+
 def assemble_cnn(input_shape, num_classes, num_init_blocks, num_main_blocks,
                  main_block_depth, input_num_filters, mainblock=None, 
                  initblock=None, dropout=0., normalization=BatchNormalization,
@@ -92,7 +93,7 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         assert(model_kwargs['num_outputs']==2)
         
         input_shape = model_kwargs['input_shape']
-        model_input = Input(shape=input_shape)
+        model_input = Input(shape=input_shape, name='model_input')
         
         # Assemble first model (liver)    
         model_liver_kwargs = copy.copy(model_kwargs)
@@ -139,37 +140,75 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         
         # Create discriminators
         if adversarial:
-            # Lesion descriminator
-            in_seg_lesion = Input(input_shape)
-            in_lesion_gen = merge_concatenate([lesion_output, model_input],
-                                              axis=1)
-            in_lesion_real = merge_concatenate([in_seg_lesion, model_input],
-                                               axis=1)
-            lesion_discriminator = assemble_cnn(**discriminator_kwargs)
-            lesion_discriminator.name = 'd_out_0'
-            out_desc_lesion_gen = lesion_discriminator(in_lesion_gen)
-            out_desc_lesion_real = Activation('linear', name='d_out_0_real')(\
-                                          lesion_discriminator(in_lesion_real))
+            def make_trainable(model, trainable=True):
+                for l in model.layers:
+                    if isinstance(l, Model):
+                        make_trainable(l, trainable)
+                    else:
+                        l.trainable = trainable
             
-            # Liver descriminator
-            in_seg_liver = Input(input_shape)
-            in_liver_gen = merge_concatenate([liver_output, model_input],
+            # Create untrainable segmentation generator output.
+            model_gen = Model(inputs=model_input,
+                              outputs=[lesion_output, liver_output])
+            make_trainable(model_gen, False)
+            outputs_gen = model_gen(model_input)
+            
+            # Assemble discriminators.
+            disc_0 = assemble_cnn(**discriminator_kwargs)
+            disc_1 = assemble_cnn(**discriminator_kwargs)
+            
+            # Create discriminator outputs for real data.
+            input_disc_0_seg = Input(input_shape, name='input_disc_0_seg')
+            input_disc_1_seg = Input(input_shape, name='input_disc_1_seg')
+            input_disc_0 = merge_concatenate([input_disc_0_seg, model_input],
                                              axis=1)
-            in_liver_real = merge_concatenate([in_seg_liver, model_input],
+            input_disc_1 = merge_concatenate([input_disc_1_seg, model_input],
+                                             axis=1)
+            out_disc_0 = disc_0(input_disc_0)
+            out_disc_1 = disc_1(input_disc_1)
+            
+            # Create discriminator outputs for training the discriminators.
+            input_disc_0 = merge_concatenate([outputs_gen[0], model_input],
                                               axis=1)
-            liver_discriminator = assemble_cnn(**discriminator_kwargs)
-            liver_discriminator.name = 'd_out_1'
-            out_desc_liver_gen = liver_discriminator(in_liver_gen)
-            out_desc_liver_real = Activation('linear', name='d_out_1_real')(\
-                                            liver_discriminator(in_liver_real))
+            input_disc_1 = merge_concatenate([outputs_gen[1], model_input],
+                                              axis=1)
+            out_adv_0_d = disc_0(input_disc_0)
+            out_adv_1_d = disc_1(input_disc_1)
+            
+            # Make discriminators untrainable, generator trainable.
+            make_trainable(model_gen, True)
+            make_trainable(disc_0, False)
+            make_trainable(disc_1, False)
+            
+            # Create discriminator outputs for training the generator.
+            outputs_gen = model_gen(model_input)
+            input_disc_0 = merge_concatenate([outputs_gen[0], model_input],
+                                              axis=1)
+            input_disc_1 = merge_concatenate([outputs_gen[1], model_input],
+                                              axis=1)
+            out_adv_0_g = disc_0(input_disc_0)
+            out_adv_1_g = disc_1(input_disc_1)
+            
+            # Name the outputs.
+            def name_layer(tensor, name):
+                return Activation('linear', name=name)(tensor)
+            out_adv_0_d = name_layer(out_adv_0_d, 'out_adv_0_d')
+            out_adv_1_d = name_layer(out_adv_1_d, 'out_adv_1_d')
+            out_adv_0_g = name_layer(out_adv_0_g, 'out_adv_0_g')
+            out_adv_1_g = name_layer(out_adv_1_g, 'out_adv_1_g')
+            out_disc_0 = name_layer(out_disc_0, 'out_disc_0')
+            out_disc_1 = name_layer(out_disc_1, 'out_disc_1')
         
         # Create aggregate model
         if adversarial:
             model = Model( \
-                inputs=[model_input, in_seg_lesion, in_seg_liver],
+                inputs=[model_input,
+                        input_disc_0_seg,
+                        input_disc_1_seg],
                 outputs=[lesion_output, liver_output,
-                         out_desc_lesion_gen, out_desc_liver_gen,
-                         out_desc_lesion_real, out_desc_liver_real])
+                         out_adv_0_d, out_adv_1_d,
+                         out_adv_0_g, out_adv_1_g,
+                         out_disc_0, out_disc_1])
         else:
             model = Model(inputs=model_input,
                           outputs=[lesion_output, liver_output])

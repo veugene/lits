@@ -157,7 +157,7 @@ def repeat_flow(flow, num_outputs, adversarial=False):
         for i in range(num_outputs):
             if adversarial:
                 # Discriminator inputs.
-                inputs.append(batch[1])
+                inputs.append(batch[1]==(num_outputs-i))
             # All model outputs.
             outputs.append(batch[1])
         
@@ -165,6 +165,7 @@ def repeat_flow(flow, num_outputs, adversarial=False):
         if adversarial:
             bs = len(batch[0])
             outputs.extend([np.zeros(bs, dtype=np.int32)] * num_outputs)
+            outputs.extend([np.ones(bs, dtype=np.int32)] * num_outputs)
             outputs.extend([np.ones(bs, dtype=np.int32)] * num_outputs)
     
         if len(inputs)==1:
