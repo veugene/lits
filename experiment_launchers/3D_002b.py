@@ -1,4 +1,4 @@
-# Off-center features are a copy of the center feature.
+# Off-center features initialized by he_normal.
 
 import sys
 sys.path.append("..")
@@ -14,7 +14,7 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', "/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "3D/002"),
+    ('save_subdir', "3D/002b"),
     ('load_subpath', "orig_rerun/001/weights.hdf5"),      # Load 2D into 3D
     ('random_seed', 1234),
     ('num_train', 100),

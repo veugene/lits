@@ -7,6 +7,7 @@ from data_tools.io import data_flow
 from data_tools.wrap import (multi_source_array,
                              delayed_view)
 from keras import backend as K
+from keras.initializers import he_normal
 
 
 def resize_stack(arr, size, interp='bilinear'):
@@ -242,9 +243,14 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
                 var = g[wname_load][...]
                 if weights_dict[wname].ndim!=var.ndim:
                     # Load 2D into 3D
-                    var = np.repeat(np.expand_dims(var, axis=0),
-                                    repeats=weights_dict[wname].shape[0].eval(),
-                                    axis=0)
+                    weight_shape = tuple(weights_dict[wname].shape.eval())
+                    var_z = np.array(he_normal()(weight_shape).eval(),
+                                     dtype=np.float32)
+                    var_z[weights_dict[wname].shape[0].eval()//2] = var
+                    var = var_z 
+                    #var = np.repeat(np.expand_dims(var, axis=0),
+                                    #repeats=weights_dict[wname].shape[0].eval(),
+                                    #axis=0).astype(np.float32)
                 weights_dict[wname].set_value(var)
             else:
                 print("WARNING: {} not found in model (skipped)".format(wname))
