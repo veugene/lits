@@ -49,10 +49,11 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                    preprocessor_network=None, postprocessor_network=None,
                    mainblock=None, initblock=None, nonlinearity='relu',
                    dropout=0., normalization=BatchNormalization,
-                   weight_decay=None, norm_kwargs=None, init='he_normal',
-                   ndim=2, cycles_share_weights=True, num_residuals=1,
-                   num_first_conv=1, num_final_conv=1, num_classifier=1,
-                   num_outputs=1, use_first_conv=True, use_final_conv=True):
+                   weight_norm=False, weight_decay=None, norm_kwargs=None,
+                   init='he_normal', ndim=2, cycles_share_weights=True,
+                   num_residuals=1, num_first_conv=1, num_final_conv=1,
+                   num_classifier=1, num_outputs=1, use_first_conv=True,
+                   use_final_conv=True):
     """
     input_shape : tuple specifiying the 2D image input shape.
     num_classes : number of classes in the segmentation output.
@@ -76,8 +77,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     initblock : a layer defining the initblock (basic_block_mp by default).
     nonlinearity : string or function specifying/defining the nonlinearity.
     dropout : the dropout probability, introduced in every block.
-    normalization : The normalization to apply to layers (by default: batch
+    normalization : the normalization to apply to layers (by default: batch
         normalization). If None, no normalization is applied.
+    weight_norm : boolean, whether to use weight norm on conv layers.
     weight_decay : the weight decay (L2 penalty) used in every convolution.
     norm_kwargs : keyword arguments to pass to batch norm layers.
     init : string or function specifying the initializer for layers.
@@ -139,6 +141,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 conv_layer = Convolution(filters=into._keras_shape[1],
                                          kernel_size=1,
                                          ndim=ndim,
+                                         weight_norm=weight_norm,
                                          kernel_initializer=init,
                                          padding='valid',
                                          kernel_regularizer=_l2(weight_decay),
@@ -146,6 +149,9 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             skips[cycle][direction][depth] = conv_layer
             x = conv_layer(x)
         out = merge_add([x, into])
+        if weight_norm and normalization is None:
+            # Divide sum by two.
+            out = Lambda(lambda x: x/2., output_shape=lambda x: x)(out)
         return out
     
     '''
@@ -163,6 +169,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
     '''
     block_kwargs = {'skip': True,
                     'dropout': dropout,
+                    'weight_norm': weight_norm,
                     'weight_decay': weight_decay,
                     'num_residuals': num_residuals,
                     'norm_kwargs': norm_kwargs,
@@ -203,12 +210,17 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 for i in range(num_first_conv):
                     out = Convolution(filters=input_num_filters,
                                       kernel_size=3, ndim=ndim,
+                                      weight_norm=weight_norm,
                                       kernel_initializer=init, padding='same',
                                       kernel_regularizer=_l2(weight_decay),
                                       name=_unique('first_conv_'+str(i)))(x)
                     outputs.append(out)
                 if len(outputs)>1:
                     out = merge_add(outputs)
+                    if weight_norm and normalization is None:
+                        # Divide sum by two.
+                        out = Lambda(lambda x: x/2.,
+                                     output_shape=lambda x: x)(out)
                 else:
                     out = outputs[0]
                 return out
@@ -350,6 +362,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                 for i in range(num_final_conv):
                     out = Convolution(filters=input_num_filters,
                                       kernel_size=3, ndim=ndim,
+                                      weight_norm=weight_norm,
                                       kernel_initializer=init, padding='same',
                                       kernel_regularizer=_l2(weight_decay),
                                       name=_unique('final_conv_'+str(i)))(x)

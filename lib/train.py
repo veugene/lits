@@ -27,6 +27,8 @@ from .callbacks import (Dice,
                         SavePredictions,
                         FileLogger)
 from .model_variants import assemble_model
+from .normalization_layers import (WeightNorm,
+                                   LayerNorm)
 from .loss import dice_loss
 from .utils import (data_generator,
                     repeat_flow,
@@ -403,6 +405,8 @@ def load_model(path, num_outputs, liver_only):
         custom_object_list.extend(custom_object_list[-1].get_metrics())
         custom_object_list.append(dice_loss([1, 2]))
     custom_objects = dict((f.__name__, f) for f in custom_object_list)
+    custom_objects['WeightNorm'] = WeightNorm
+    custom_objects['LayerNorm'] = LayerNorm
     model = keras.models.load_model(path, custom_objects=custom_objects)
     return model
 
