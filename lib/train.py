@@ -231,7 +231,9 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
     if not hasattr(model, 'optimizer'):
         def loss(loss_func, weight):
             def f(y_true, y_pred):
-                return loss_func(y_true, y_pred)*weight
+                loss = loss_func(y_true, y_pred)*weight
+                loss.__name__ = loss_func.__name__
+                return loss
             return f
         masked_class = 0 if mask_to_liver else None
         losses = {}
