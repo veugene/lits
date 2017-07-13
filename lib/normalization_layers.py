@@ -1,5 +1,6 @@
 # Copyright (c) Chris Beckham 2017
 
+from __future__ import print_function
 import keras
 from keras import backend as K
 from keras.layers import Layer, Dense, Conv2D, activations
@@ -33,12 +34,12 @@ class LayerNorm(Layer):
         super(LayerNorm, self).__init__(**kwargs)
 
     def build(self, input_shape):
-        # what are the dimensions of the gamma/beta params?
+        # What are the dimensions of the gamma/beta params?
         # (bs, p) --> n_out_idx = 1 (-1)
         # (bs, seq, p) --> n_out_idx = 2 (-1)
         # (bs, f, h, w) --> n_out_idx = 1
         self.n_out_idx = -1 if len(input_shape) in [2,3] else 1
-        # what axes do we normalise over?
+        # What axes do we normalise over?
         # (bs, p) --> axes = 1 (-1)
         # (bs, seq, p) --> axes = 2 (-1)
         # (bs, f, h, w) --> axes = (2,3)
@@ -82,7 +83,7 @@ class LayerNorm(Layer):
 
 class WeightNorm(Wrapper):
     """
-    Compute weight norm as described in: ...
+    Compute weight norm as described in: ... TODO: comment
     """
     def __init__(self, layer, g_initializer='ones', **kwargs):
         if not ( isinstance(layer, Dense) or isinstance(layer, Conv2D) ):
@@ -104,10 +105,10 @@ class WeightNorm(Wrapper):
         self.g = self.add_weight(shape=(W.get_value().shape[-1]), name='g', initializer='ones')
         if len(input_shape) == 4:
             norm_w = K.sqrt(K.sum(K.square(W), axis=(0,1,2), keepdims=True))
-            # keras kernel is of the form (k,k,in_dim,out_dim),
-            # but if we compute the norm it is in the shape (1,1,1,10).
-            # we want it to be in the shape (1,10,1,1), i.e. the 2nd axis
-            # is the feature map axis, and the axes with 1's are 'broadcast' axes
+            # Keras kernel is of the form (k,k,in_dim,out_dim), but if we 
+            # compute the norm it is in the shape (1,1,1,10). We want it to be
+            # in the shape (1,10,1,1), i.e. the 2nd axis is the feature map 
+            # axis, and the axes with 1's are 'broadcast' axes.
             norm_w = norm_w.swapaxes(-1,-2).swapaxes(-2,-3)
             self.norm_w = norm_w
             #self.g = self.g.dimshuffle('x',0,'x','x')
@@ -116,7 +117,7 @@ class WeightNorm(Wrapper):
             self.norm_w = K.sqrt(K.sum(K.square(W), axis=0, keepdims=True))
             #self.g = self.g.dimshuffle('x',0)
             n_out = self.layer.units
-        # define our own bias term here
+        # Define our own bias term here.
         # TODO: don't add a bias if the wrapped layer never had one in the first place
         self.bias = self.add_weight(shape=(n_out,), name='bias',
                                     initializer=self.layer.bias_initializer,
@@ -126,7 +127,6 @@ class WeightNorm(Wrapper):
         super(WeightNorm, self).build(input_shape)
         
     def compute_output_shape(self, input_shape):
-        #print dir(self.layer)
         return self.layer.compute_output_shape(input_shape)
     
     @property
@@ -158,10 +158,11 @@ def test_weight_norm_mlp():
     tmp.summary()
     wt_before = [ np.sum(elem.get_value()**2) for elem in tmp.weights ]
     tmp.compile(optimizer='adam', loss='categorical_crossentropy')
-    print "training..."
+    print("training...")
     tmp.fit(x=xfake, y=yfake, epochs=100, verbose=0)
-    print "weight magnitudes before train:",  wt_before
-    print "weight magnitudes after train:",  [ np.sum(elem.get_value()**2) for elem in tmp.weights ]
+    print("weight magnitudes before train:",  wt_before)
+    print("weight magnitudes after train:",
+          [ np.sum(elem.get_value()**2) for elem in tmp.weights ])
     
 def test_weight_norm_cnn():
     import numpy as np
@@ -177,10 +178,11 @@ def test_weight_norm_cnn():
     tmp.summary()
     wt_before = [ np.sum(elem.get_value()**2) for elem in tmp.weights ]
     tmp.compile(optimizer='adam', loss='categorical_crossentropy')
-    print "training..."
+    print("training...")
     tmp.fit(x=xfake, y=yfake, epochs=100, verbose=0)
-    print "weight magnitudes before train:",  wt_before
-    print "weight magnitudes after train:",  [ np.sum(elem.get_value()**2) for elem in tmp.weights ]
+    print("weight magnitudes before train:",  wt_before)
+    print("weight magnitudes after train:",
+          [ np.sum(elem.get_value()**2) for elem in tmp.weights ])
     
 if __name__ == '__main__':
     test_weight_norm_mlp()
