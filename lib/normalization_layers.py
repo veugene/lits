@@ -127,7 +127,7 @@ class WeightNorm(Wrapper):
         
     def compute_output_shape(self, input_shape):
         #print dir(self.layer)
-        return self.layer.output_shape
+        return self.layer.compute_output_shape(input_shape)
     
     @property
     def trainable_weights(self):
