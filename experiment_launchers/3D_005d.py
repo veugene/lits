@@ -2,7 +2,6 @@ import sys
 sys.path.append("..")
 from collections import OrderedDict
 from keras.layers import BatchNormalization
-from keras.initializers import VarianceScaling
 from lib.blocks import (bottleneck,
                         basic_block,
                         basic_block_mp)
@@ -11,9 +10,9 @@ import os
 
 
 general_settings = OrderedDict((
-    ('results_dir', "/export/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "3D/007"),
-    ('load_subpath', "selu/001/best_weights_ldice.hdf5"),
+    ('results_dir', "/home/eugene/Experiments/lits/results"),
+    ('save_subdir', "3D/005d"),
+    ('load_subpath', "orig_rerun/001/best_weights_ldice.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
@@ -54,18 +53,17 @@ model_kwargs = OrderedDict((
     ('num_final_conv', 1),
     ('num_classifier', 1),
     ('num_outputs', 2),
-    ('init', VarianceScaling(scale=1., mode='fan_in', distribution='normal')),
-    ('nonlinearity', 'selu'),
+    ('init', 'he_normal'),
+    ('nonlinearity', 'relu'),
     ('two_levels', True),
     ('multi_slice', True),
     ('ndim', 3)
     ))
 
 data_gen_kwargs = OrderedDict((
-    ('data_path', "/data/TransientData/Candela/lits_challenge/"
-                  "data_liver.zarr"),
+    ('data_path', "/store/Data/lits_challenge/sorted/data_liver.zarr"),
     ('nb_io_workers', 1),
-    ('nb_proc_workers', 4),
+    ('nb_proc_workers', 2),
     ('downscale', True),
     ('num_consecutive', 1)
     ))

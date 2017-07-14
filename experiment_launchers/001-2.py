@@ -2,6 +2,7 @@ import sys
 sys.path.append("..")
 from collections import OrderedDict
 from keras.layers import BatchNormalization
+from keras.initializers import VarianceScaling
 from lib.blocks import (bottleneck,
                         basic_block,
                         basic_block_mp)
@@ -11,26 +12,19 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', "/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "3D/005b"),
+    ('save_subdir', "orig_rerun/001-2"),
     ('load_subpath', "orig_rerun/001/best_weights_ldice.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
+    ('layers_to_not_freeze', None),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
                      101, 105, 106, 114, 115, 119]),
+    ('freeze', False),
     ('evaluate', False)
-    ))
-    
-loader_kwargs = OrderedDict((
-    ('freeze', True),
-    ('verbose', True),
-    ('layers_to_not_freeze', None),
-    ('freeze_mask', ["classifier"]),
-    ('load_mask', ["classifier"]),
-    ('depth_offset', 0)
     ))
 
 model_kwargs = OrderedDict((
-    ('input_shape', (1, 3, 256, 256)),
+    ('input_shape', (1, 512, 512)),
     ('num_classes', 1),
     ('num_init_blocks', 2),
     ('num_main_blocks', 3),
@@ -39,7 +33,6 @@ model_kwargs = OrderedDict((
     ('num_cycles', 1),
     ('weight_decay', 0.0005), 
     ('dropout', 0.05),
-    ('weight_norm', False),
     ('normalization', BatchNormalization),
     ('mainblock', basic_block),
     ('initblock', basic_block_mp),
@@ -55,16 +48,15 @@ model_kwargs = OrderedDict((
     ('num_outputs', 2),
     ('init', 'he_normal'),
     ('two_levels', True),
-    ('multi_slice', True),
-    ('ndim', 3)
+    ('ndim', 2)
     ))
 
 data_gen_kwargs = OrderedDict((
     ('data_path', "/store/Data/lits_challenge/sorted/data_liver.zarr"),
     ('nb_io_workers', 1),
-    ('nb_proc_workers', 2),
-    ('downscale', True),
-    ('num_consecutive', 1)
+    ('nb_proc_workers', 4),
+    ('downscale', False),
+    ('num_consecutive', None)
     ))
 
 data_augmentation_kwargs = OrderedDict((
@@ -89,18 +81,18 @@ data_augmentation_kwargs = OrderedDict((
 train_kwargs = OrderedDict((
     # data
     ('num_classes', 1),
-    ('batch_size', 15),
-    ('val_batch_size', 40),
-    ('num_epochs', 200),
+    ('batch_size', 10),
+    ('val_batch_size', 50),
+    ('num_epochs', 20),
     ('max_patience', 50),
     
     # optimizer
     ('optimizer', 'RMSprop'),   # 'RMSprop', 'nadam', 'adam', 'sgd'
-    ('learning_rate', 0.001),
+    ('learning_rate', 0.0001),
     
     # other
     ('show_model', False),
-    ('save_every', 0),         # Save predictions every x epochs
+    ('save_every', 10),         # Save predictions every x epochs
     ('mask_to_liver', False),
     ('liver_only', False)
     ))
@@ -110,5 +102,5 @@ run(general_settings=general_settings,
     model_kwargs=model_kwargs,
     data_gen_kwargs=data_gen_kwargs,
     data_augmentation_kwargs=data_augmentation_kwargs,
-    train_kwargs=train_kwargs,
-    loader_kwargs=loader_kwargs)
+    train_kwargs=train_kwargs)
+ 
