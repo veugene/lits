@@ -467,6 +467,8 @@ def run(general_settings,
         ("Data augmentation settings", data_augmentation_kwargs),
         ("Trainer settings", train_kwargs)
         ))
+    if loader_kwargs is not None:
+        all_dicts['loader_kwargs'] = loader_kwargs
     print("Experiment:", general_settings['save_subdir'])
     print("")
     for name, d in all_dicts.items():
@@ -563,8 +565,7 @@ def run(general_settings,
                     # Backward compatibility
                     if key in general_settings:
                         loader_kwargs[key] = general_settings[key]
-            load_and_freeze_weights(model, load_path, verbose=True,
-                                    **loader_kwargs)
+            load_and_freeze_weights(model, load_path, **loader_kwargs)
             #model.save(os.path.join(experiment_dir, "model.hdf5"))
             #model.load_weights(load_path)
             #model.save_weights(load_path+'.renamed')

@@ -176,7 +176,7 @@ def repeat_flow(flow, num_outputs, adversarial=False):
         yield (inputs, outputs)
         
 
-def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
+def load_and_freeze_weights(model, load_path, freeze=True, verbose=True,
                             layers_to_not_freeze=None, freeze_mask=None,
                             load_mask=None, depth_offset=0):
     if load_mask is None:
@@ -192,11 +192,6 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
         weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
         for wname_load in weight_names:
             
-            # Skip masked out weights.
-            for m in load_mask:
-                if m in wname_load:
-                    continue
-                
             # Rename weights to account for depth offset.
             wname_parts = wname_load.split('_')
             for i, part in enumerate(wname_parts):
@@ -217,44 +212,42 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
                 if part.startswith('bn'):
                     wname_parts[i] = 'norm'+part[2:]
             wname = '_'.join(wname_parts)
-                
+            
+            # Skip weights that are not in the model.
+            if not wname in weights_dict:
+                print("WARNING: {} not found in model (skipped)".format(wname))
+                continue
+            
+            # Skip masked out weights.
+            skip = False
+            for m in load_mask:
+                if m in wname_load:
+                    print("(Not setting weights {})".format(wname_load))
+                    skip = True
+            if skip:
+                continue
+            
+            # Weight names must be unique!.
+            if wname in used_names:
+                raise ValueError("{} already previously loaded!".format(wname))
+            used_names.append(wname)
             
             # Set weights
-            
-            ## TEMP
-            #if wname not in weights_dict:
-                #wname_parts = wname_load.split('_')
-                #new_wname_parts = []
-                #for i, part in enumerate(wname_parts):
-                    #if not part.isdigit():
-                        #new_wname_parts.append(part)
-                    #else:
-                        #new_wname_parts.append(part)
-                        #new_wname_parts.append('1')
-                #wname = '_'.join(new_wname_parts)
-            ## /TEMP
-                
-            if wname in weights_dict:
-                if wname in used_names:
-                    raise ValueError("{} already previously loaded!"
-                                     "".format(wname))
-                used_names.append(wname)
-                if verbose:
-                    print("Setting weights {}".format(wname))
-                var = g[wname_load][...]
-                if weights_dict[wname].ndim!=var.ndim:
-                    # Load 2D into 3D
-                    weight_shape = tuple(weights_dict[wname].shape.eval())
-                    var_z = np.array(he_normal()(weight_shape).eval(),
-                                     dtype=np.float32)
-                    var_z[weights_dict[wname].shape[0].eval()//2] = var
-                    var = var_z 
-                    #var = np.repeat(np.expand_dims(var, axis=0),
-                                    #repeats=weights_dict[wname].shape[0].eval(),
-                                    #axis=0).astype(np.float32)
-                weights_dict[wname].set_value(var)
-            else:
-                print("WARNING: {} not found in model (skipped)".format(wname))
+            if verbose:
+                print("Setting weights {}".format(wname))
+            var = g[wname_load][...]
+            if weights_dict[wname].ndim!=var.ndim:
+                # Load 2D into 3D
+                weight_shape = tuple(weights_dict[wname].shape.eval())
+                #var_z = np.array(he_normal()(weight_shape).eval(),
+                                    #dtype=np.float32)
+                var_z = np.zeros(weight_shape, dtype=np.float32)
+                var_z[weights_dict[wname].shape[0].eval()//2] = var
+                var = var_z 
+                #var = np.repeat(np.expand_dims(var, axis=0),
+                                #repeats=weights_dict[wname].shape[0].eval(),
+                                #axis=0).astype(np.float32)
+            weights_dict[wname].set_value(var)
 
     if freeze:
         layers_to_freeze = []
