@@ -262,8 +262,8 @@ def load_and_freeze_weights(model, load_path, freeze=True, verbose=False,
             layers_to_not_freeze = []
         if freeze_mask is None:
             freeze_mask = []
-        param_names = ["_W", "_b", "_gamma", "_beta",
-                       "_running_mean", "_running_std"]
+        param_names = ["/kernel", "/bias", "/gamma", "/beta",
+                       "/moving_mean", "/moving_variance"]
         for name in layer_names:
             g = f[name]
             weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
