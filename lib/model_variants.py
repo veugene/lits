@@ -16,7 +16,8 @@ from .blocks import (Convolution,
                      bottleneck,
                      basic_block,
                      basic_block_mp,
-                     residual_block)
+                     residual_block,
+                     get_nonlinearity)
 
 
 def assemble_cnn(input_shape, num_classes, num_init_blocks, num_main_blocks,
@@ -288,6 +289,7 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
               liver_output_pre._keras_shape)
         
         # Add 3D convolutions to combine information across slices.
+        nonlinearity = model_kwargs['nonlinearity']
         lesion_output_pre = Convolution( \
             filters=model_kwargs['input_num_filters'],
             kernel_size=3,
@@ -296,6 +298,7 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
             weight_norm=model_kwargs['weight_norm'],
             kernel_regularizer=_l2(model_kwargs['weight_decay']),
             name='conv_3D_0')(lesion_output_pre)
+        lesion_output_pre = get_nonlinearity(nonlinearity)(lesion_output_pre)
         liver_output_pre = Convolution( \
             filters=model_kwargs['input_num_filters'],
             kernel_size=3,
@@ -304,6 +307,7 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
             weight_norm=model_kwargs['weight_norm'],
             kernel_regularizer=_l2(model_kwargs['weight_decay']),
             name='conv_3D_1')(liver_output_pre)
+        liver_output_pre = get_nonlinearity(nonlinearity)(liver_output_pre)
         
         # Create classifier for lesion.
         lesion_output = Convolution(filters=1, kernel_size=1,
