@@ -77,6 +77,39 @@ def assemble_cnn(input_shape, num_classes, num_init_blocks, num_main_blocks,
     model = Model(inputs=input, outputs=output)
     
     return model
+
+
+def assemble_base_model(**model_kwargs):
+    assert(model_kwargs['num_outputs']==2)
+    
+    input_shape = model_kwargs['input_shape']
+    model_input = Input(shape=input_shape)
+    
+    # Assemble first model (liver)    
+    model_liver_kwargs = copy.copy(model_kwargs)
+    model_liver_kwargs['num_classes'] = None
+    model_liver = assemble_cycled_model(**model_liver_kwargs)
+    liver_output_pre = model_liver(model_input)
+    
+    # Assemble second model on top (lesion)
+    model_lesion_kwargs = copy.copy(model_kwargs)
+    model_lesion_kwargs['num_outputs'] = 1
+    model_lesion_kwargs['num_classes'] = None
+    model_lesion_kwargs['input_shape'] = \
+                                (liver_output_pre._keras_shape[1]+1,)\
+                                +input_shape[1:]
+    model_lesion = assemble_cycled_model(**model_lesion_kwargs)
+    
+    # Connect first model to second
+    lesion_input = merge_concatenate([model_input, liver_output_pre], 
+                                        axis=1)
+    lesion_output_pre = model_lesion(lesion_input)
+    
+    # Base model
+    model = Model(inputs=model_input,
+                  outputs=[lesion_output_pre, liver_output_pre])
+    
+    return model
                  
 
 def assemble_model(two_levels=False, num_residuals_bottom=None,
@@ -219,67 +252,42 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
     
     if multi_slice:
         assert(model_kwargs['ndim']==3)
+        
+        # Assemble base model.
         input_shape = model_kwargs['input_shape']
-        input_multi_slice = Input(input_shape)
         input_shape_2D = (input_shape[0],)+input_shape[2:]
+        model_kwargs_2D = copy.copy(model_kwargs)
+        model_kwargs_2D['ndim'] = 2
+        model_kwargs_2D['input_shape'] = input_shape_2D
+        base_model = assemble_base_model(**model_kwargs_2D)
         
-        # Prepare flat model kwargs.
-        model_2D_kwargs = copy.copy(model_kwargs)
-        model_2D_kwargs['num_classes'] = None
-        model_2D_kwargs['ndim'] = 2
-        model_2D_kwargs['input_shape'] = input_shape_2D
-        model_2D_kwargs['num_outputs'] = 1
-        
-        # Assemble liver model.
-        model_liver = assemble_cycled_model(**model_2D_kwargs)
-        
-        # Prepare to instantiate parallel models, sharing weights.
+        # Instantiate parallel models, sharing weights.
         # NOTE: batch norm statistics are shared!
+        input_multi_slice = Input(input_shape)
+        lesion_output_pre = []
+        liver_output_pre = []
         z_axis = 2
         def select(i):
-            return Lambda(lambda x: x[:,:,i,:,:],
-                          output_shape=lambda x: x[0:z_axis]+x[z_axis+1:])
+            return Lambda(lambda x: x[:,:,i,:,:], output_shape=input_shape_2D)
         def expand():
             output_shape = (model_kwargs['input_num_filters'],
                             1,)+input_shape_2D[1:]
             return Lambda(lambda x: K.expand_dims(x, axis=z_axis),
-                          output_shape=lambda x: x[0:z_axis]+(1,)+x[z_axis:])
-        
-        # Parallel liver models.
-        liver_model_output = []
+                          output_shape=output_shape)
+        #inputs = []
         for i in range(3):
-            out = model_liver(select(i)(input_multi_slice))
-            liver_model_output.append(expand()(out))
-        liver_model_output = merge_concatenate(liver_model_output,
-                                               axis=z_axis)
+            #input_i = Input(input_shape_2D)
+            #inputs.append(input_i)
+            #out_0, out_1 = base_model(input_i)
+            out_0, out_1 = base_model(select(i)(input_multi_slice))
+            lesion_output_pre.append(expand()(out_0))
+            liver_output_pre.append(expand()(out_1))
+        lesion_output_pre = merge_concatenate(lesion_output_pre, axis=z_axis)
+        liver_output_pre = merge_concatenate(liver_output_pre, axis=z_axis)
+        print("DEBUG", lesion_output_pre._keras_shape,
+              liver_output_pre._keras_shape)
         
-        # Add 3D convolution to combine information across slices.
-        liver_output_pre = Convolution( \
-            filters=model_kwargs['input_num_filters'],
-            kernel_size=3,
-            ndim=3,
-            padding='same',
-            weight_norm=model_kwargs['weight_norm'],
-            kernel_regularizer=_l2(model_kwargs['weight_decay']),
-            name='conv_3D_1')(liver_model_output)
-        
-        # Assemble lesion model.
-        model_2D_kwargs['input_shape'] = \
-                      (model_kwargs['input_num_filters']+1,)+input_shape_2D[1:]
-        model_lesion = assemble_cycled_model(**model_2D_kwargs)
-        
-        # Parallel lesion models.
-        lesion_model_output = []
-        for i in range(3):
-            input_lesion = merge_concatenate([select(i)(input_multi_slice),
-                                              select(i)(liver_output_pre)],
-                                             axis=1)
-            out = model_lesion(input_lesion)
-            lesion_model_output.append(expand()(out))
-        lesion_model_output = merge_concatenate(lesion_model_output,
-                                                axis=z_axis)
-        
-        # Add 3D convolution to combine information across slices.
+        # Add 3D convolutions to combine information across slices.
         lesion_output_pre = Convolution( \
             filters=model_kwargs['input_num_filters'],
             kernel_size=3,
@@ -287,7 +295,15 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
             padding='same',
             weight_norm=model_kwargs['weight_norm'],
             kernel_regularizer=_l2(model_kwargs['weight_decay']),
-            name='conv_3D_0')(lesion_model_output)
+            name='conv_3D_0')(lesion_output_pre)
+        liver_output_pre = Convolution( \
+            filters=model_kwargs['input_num_filters'],
+            kernel_size=3,
+            ndim=3,
+            padding='same',
+            weight_norm=model_kwargs['weight_norm'],
+            kernel_regularizer=_l2(model_kwargs['weight_decay']),
+            name='conv_3D_1')(liver_output_pre)
         
         # Create classifier for lesion.
         lesion_output = Convolution(filters=1, kernel_size=1,
