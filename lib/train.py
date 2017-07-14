@@ -179,6 +179,17 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                                              mode='max',
                                              save_best_only=True,
                                              save_weights_only=False)
+    if not mask_to_liver and lesion_output is not None:
+        monitor = 'val_dice_loss_2_m0' if num_outputs==1 \
+            else 'val_output_0_dice_loss_2_m0'
+        checkpointer_best_mldice = ModelCheckpoint(\
+                filepath=os.path.join(save_path, "best_weights_mldice.hdf5"),
+                                      verbose=1,
+                                      monitor=monitor,
+                                      mode='max',
+                                      save_best_only=True,
+                                      save_weights_only=False)
+        callbacks['checkpointer_best_mldice'] = checkpointer_best_mldice
     callbacks['checkpointer_best_ldice'] = checkpointer_best_ldice
     callbacks['checkpointer_best_dice'] = checkpointer_best_dice
     
