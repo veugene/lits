@@ -54,7 +54,7 @@ def scrub(path, keys):
                 if epoch not in history[key]:
                     history[key][epoch] = []
                 if key in split_line:
-                    val_idx = split_line.index(key)+1
+                    val_idx = len(split_line)-split_line[::-1].index(key)
                     history[key][epoch].append(float(split_line[val_idx]))
             #epoch += 1
                     
