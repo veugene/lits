@@ -109,10 +109,20 @@ def data_generator(data_path, volume_indices, batch_size,
     msa_vol = multi_source_array(source_list=volumes, shuffle=False)
     msa_seg = multi_source_array(source_list=segmentations, shuffle=False)
     if num_consecutive is not None:
-        msa_vol = consecutive_slice_view(msa_vol,
-                                         num_consecutive=num_consecutive)
-        msa_seg = consecutive_slice_view(msa_seg,
-                                         num_consecutive=num_consecutive)
+        if hasattr(num_consecutive, '__len__'):
+            if len(num_consecutive)!=2:
+                raise ValueError("num_consecutive must be a length two list "
+                                 "or an integer. Recieved {}"
+                                 "".format(num_consecutive))
+            vol_num_consecutive, seg_num_consecutive = num_consecutive
+        else:
+            vol_num_consecutive = seg_num_consecutive = num_consecutive
+        if vol_num_consecutive is not None:
+            msa_vol = consecutive_slice_view(msa_vol,
+                                           num_consecutive=vol_num_consecutive)
+        if seg_num_consecutive is not None:
+            msa_seg = consecutive_slice_view(msa_seg,
+                                           num_consecutive=seg_num_consecutive)
     
     # Function to rescale the data and do data augmentation, if requested
     def preprocessor(batch):
@@ -123,11 +133,12 @@ def data_generator(data_path, volume_indices, batch_size,
         if downscale:
             b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
             b1 = resize_stack(b1, size=(256, 256), interp='nearest')
-        if transform_kwargs is not None:
-            for idx in np.ndindex(b0.shape[:-3]):
-                x, y = random_transform(b0[idx], b1[idx], **transform_kwargs)
-                b0[idx], b1[idx] = x, y
         b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
+        if transform_kwargs is not None:
+            for idx0, idx1 in zip(np.ndindex(b0.shape[:-3]),
+                                  np.ndindex(b1.shape[:-3])):
+                x, y = random_transform(b0[idx0], b1[idx1], **transform_kwargs)
+                b0[idx0], b1[idx1] = x, y
         # standardize
         b0 /= 255.0
         b0 = np.clip(b0, -2.0, 2.0)

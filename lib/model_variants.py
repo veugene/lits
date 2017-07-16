@@ -4,7 +4,8 @@ from keras.layers import (Input,
                           Permute,
                           BatchNormalization,
                           Lambda,
-                          Dense)
+                          Dense,
+                          Reshape)
 from keras.layers.merge import concatenate as merge_concatenate
 from keras.models import Model
 from keras import backend as K
@@ -114,7 +115,7 @@ def assemble_base_model(**model_kwargs):
                  
 
 def assemble_model(two_levels=False, num_residuals_bottom=None,
-                   adversarial=False, multi_slice=False,
+                   adversarial=False, multi_slice=False, ms_ndim_out=3,
                    discriminator_kwargs=None, **model_kwargs):
     
     if not two_levels:
@@ -275,25 +276,24 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
                             1,)+input_shape_2D[1:]
             return Lambda(lambda x: K.expand_dims(x, axis=z_axis),
                           output_shape=output_shape)
-        #inputs = []
         for i in range(3):
-            #input_i = Input(input_shape_2D)
-            #inputs.append(input_i)
-            #out_0, out_1 = base_model(input_i)
             out_0, out_1 = base_model(select(i)(input_multi_slice))
             lesion_output_pre.append(expand()(out_0))
             liver_output_pre.append(expand()(out_1))
         lesion_output_pre = merge_concatenate(lesion_output_pre, axis=z_axis)
         liver_output_pre = merge_concatenate(liver_output_pre, axis=z_axis)
-        print("DEBUG", lesion_output_pre._keras_shape,
-              liver_output_pre._keras_shape)
+        if ms_ndim_out==2:
+            flat_shape = (model_kwargs['input_num_filters']*3,)\
+                         +input_shape_2D[1:]
+            lesion_output_pre = Reshape(flat_shape)(lesion_output_pre)
+            liver_output_pre = Reshape(flat_shape)(liver_output_pre)
         
-        # Add 3D convolutions to combine information across slices.
+        # Add convolutions to combine information across slices.
         nonlinearity = model_kwargs['nonlinearity']
         lesion_output_pre = Convolution( \
             filters=model_kwargs['input_num_filters'],
             kernel_size=3,
-            ndim=3,
+            ndim=ms_ndim_out,
             padding='same',
             weight_norm=model_kwargs['weight_norm'],
             kernel_regularizer=_l2(model_kwargs['weight_decay']),
@@ -302,7 +302,7 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         liver_output_pre = Convolution( \
             filters=model_kwargs['input_num_filters'],
             kernel_size=3,
-            ndim=3,
+            ndim=ms_ndim_out,
             padding='same',
             weight_norm=model_kwargs['weight_norm'],
             kernel_regularizer=_l2(model_kwargs['weight_decay']),
@@ -311,27 +311,39 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
         
         # Create classifier for lesion.
         lesion_output = Convolution(filters=1, kernel_size=1,
-                          ndim=3,
+                          ndim=ms_ndim_out,
                           activation='linear',
                           kernel_regularizer=_l2(model_kwargs['weight_decay']),
                           name='classifier_conv_0')
         lesion_output = lesion_output(lesion_output_pre)
-        lesion_output = Permute((2,3,4,1))(lesion_output)
+        if ms_ndim_out==2:
+            lesion_output = Permute((2,3,1))(lesion_output)
+        else:
+            lesion_output = Permute((2,3,4,1))(lesion_output)
         lesion_output = Activation('sigmoid', name='sigmoid_0')(lesion_output)
-        lesion_output_layer = Permute((4,1,2,3))
+        if ms_ndim_out==2:
+            lesion_output_layer = Permute((3,1,2))
+        else:
+            lesion_output_layer = Permute((4,1,2,3))
         lesion_output_layer.name = 'output_0'
         lesion_output = lesion_output_layer(lesion_output)
                 
         # Create classifier for liver.
         liver_output = Convolution(filters=1, kernel_size=1,
-                          ndim=3,
+                          ndim=ms_ndim_out,
                           activation='linear',
                           kernel_regularizer=_l2(model_kwargs['weight_decay']),
                           name='classifier_conv_1')
         liver_output = liver_output(liver_output_pre)
-        liver_output = Permute((2,3,4,1))(liver_output)
+        if ms_ndim_out==2:
+            liver_output = Permute((2,3,1))(liver_output)
+        else:
+            liver_output = Permute((2,3,4,1))(liver_output)
         liver_output = Activation('sigmoid', name='sigmoid_1')(liver_output)
-        liver_output_layer = Permute((4,1,2,3))
+        if ms_ndim_out==2:
+            liver_output_layer = Permute((3,1,2))
+        else:
+            liver_output_layer = Permute((4,1,2,3))
         liver_output_layer.name = 'output_1'
         liver_output = liver_output_layer(liver_output)
         
