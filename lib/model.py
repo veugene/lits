@@ -430,7 +430,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             all_outputs.append(output)
     else:
         # No classifier
-        all_outputs = x
+        all_outputs = Activation('linear', name='output_0')(x)
     
     # MODEL
     model = Model(inputs=input, outputs=all_outputs)
