@@ -73,14 +73,14 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                                   transform_kwargs=data_augmentation_kwargs,
                                   **data_gen_kwargs)
     gen['valid'] = data_generator(volume_indices=volume_indices['valid'],
-                                 batch_size=batch_size,
+                                 batch_size=val_batch_size,
                                  shuffle=False,
                                  loop_forever=True,
                                  transform_kwargs=None,
                                  **data_gen_kwargs)
     gen['valid_callback'] = data_generator( \
                                         volume_indices=volume_indices['valid'],
-                                        batch_size=batch_size,
+                                        batch_size=val_batch_size,
                                         shuffle=False,
                                         loop_forever=False,
                                         transform_kwargs=None,
