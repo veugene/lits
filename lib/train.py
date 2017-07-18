@@ -186,7 +186,7 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                 filepath=os.path.join(save_path, "best_weights_mldice.hdf5"),
                                       verbose=1,
                                       monitor=monitor,
-                                      mode='max',
+                                      mode='min',
                                       save_best_only=True,
                                       save_weights_only=False)
         callbacks['checkpointer_best_mldice'] = checkpointer_best_mldice
