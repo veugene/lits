@@ -19,6 +19,8 @@ from .blocks import (Convolution,
                      basic_block_mp,
                      residual_block,
                      get_nonlinearity)
+from .normalization_layers import (LayerNorm,
+                                   WeightNorm)
 
 
 def assemble_cnn(input_shape, num_classes, num_init_blocks, num_main_blocks,
@@ -112,204 +114,203 @@ def assemble_base_model(**model_kwargs):
                   outputs=[lesion_output_pre, liver_output_pre])
     
     return model
-                 
 
-def assemble_model(two_levels=False, num_residuals_bottom=None,
-                   adversarial=False, multi_slice=False, ms_ndim_out=3,
-                   discriminator_kwargs=None, **model_kwargs):
-    
-    if not two_levels:
-        model = assemble_cycled_model(**model_kwargs)
-        return model
-    
-    # two_levels
+
+def assemble_model_two_levels(adversarial=False, num_residuals_bottom=None,
+                              discriminator_kwargs=None, **model_kwargs):
     assert(model_kwargs['num_outputs']==2)
         
     if discriminator_kwargs is None:
         discriminator_kwargs = {}
         
-    if not multi_slice:
-        input_shape = model_kwargs['input_shape']
-        model_input = Input(shape=input_shape, name='model_input')
+    input_shape = model_kwargs['input_shape']
+    model_input = Input(shape=input_shape, name='model_input')
+
+    # Assemble first model (liver)    
+    model_liver_kwargs = copy.copy(model_kwargs)
+    model_liver_kwargs['num_classes'] = None
+    if num_residuals_bottom is not None:
+        model_liver_kwargs['num_residuals'] = num_residuals_bottom
+    model_liver = assemble_cycled_model(**model_liver_kwargs)
+    liver_output_pre = model_liver(model_input)
     
-        # Assemble first model (liver)    
-        model_liver_kwargs = copy.copy(model_kwargs)
-        model_liver_kwargs['num_classes'] = None
-        if num_residuals_bottom is not None:
-            model_liver_kwargs['num_residuals'] = num_residuals_bottom
-        model_liver = assemble_cycled_model(**model_liver_kwargs)
-        liver_output_pre = model_liver(model_input)
-        
-        # Assemble second model on top (lesion)
-        model_lesion_kwargs = copy.copy(model_kwargs)
-        model_lesion_kwargs['num_outputs'] = 1
-        model_lesion_kwargs['input_shape'] = \
-                                    (liver_output_pre._keras_shape[1]+1,)\
-                                    +input_shape[1:]
-        model_lesion = assemble_cycled_model(**model_lesion_kwargs)
-        
-        # Connect first model to second
-        lesion_input = merge_concatenate([model_input, liver_output_pre], 
-                                         axis=1)
-        
-        # Create classifier for liver
-        liver_output = Convolution(filters=1, kernel_size=1,
-                          ndim=model_kwargs['ndim'],
-                          activation='linear',
-                          kernel_regularizer=_l2(model_kwargs['weight_decay']),
-                          name='classifier_conv_1')
+    # Assemble second model on top (lesion)
+    model_lesion_kwargs = copy.copy(model_kwargs)
+    model_lesion_kwargs['num_outputs'] = 1
+    model_lesion_kwargs['input_shape'] = (liver_output_pre._keras_shape[1]+1,)\
+                                         +input_shape[1:]
+    model_lesion = assemble_cycled_model(**model_lesion_kwargs)
+    
+    # Connect first model to second
+    lesion_input = merge_concatenate([model_input, liver_output_pre], 
+                                     axis=1)
+    
+    # Create classifier for liver
+    if model_kwargs['num_classes'] is not None:
+        liver_output = Convolution(
+            filters=1, kernel_size=1,
+            ndim=model_kwargs['ndim'],
+            activation='linear',
+            kernel_regularizer=_l2(model_kwargs['weight_decay']),
+            name='classifier_conv_1')
         liver_output = liver_output(liver_output_pre)
         if model_kwargs['ndim']==2:
             liver_output = Permute((2,3,1))(liver_output)
         else:
             liver_output = Permute((2,3,4,1))(liver_output)
-        liver_output = Activation('sigmoid', name='sigmoid_1')(liver_output)
+        liver_output = Activation('sigmoid',
+                                  name='sigmoid_1')(liver_output)
         if model_kwargs['ndim']==2:
             liver_output_layer = Permute((3,1,2))
         else:
             liver_output_layer = Permute((4,1,2,3))
         liver_output_layer.name = 'output_1'
         liver_output = liver_output_layer(liver_output)
-        
-        # Lesion classifier output
-        model_lesion.name = 'output_0'
-        lesion_output = model_lesion(lesion_input)
-        
-        # Create discriminators
-        if adversarial:
-            def make_trainable(model, trainable=True):
-                for l in model.layers:
-                    if isinstance(l, Model):
-                        make_trainable(l, trainable)
-                    else:
-                        l.trainable = trainable
-            
-            # Assemble discriminators.
-            disc_0 = assemble_cnn(**discriminator_kwargs)
-            disc_1 = assemble_cnn(**discriminator_kwargs)
-            
-            # Create discriminator outputs for real data.
-            input_disc_0_seg = Input(input_shape, name='input_disc_0_seg')
-            input_disc_1_seg = Input(input_shape, name='input_disc_1_seg')
-            input_disc_0 = merge_concatenate([input_disc_0_seg, model_input],
-                                             axis=1)
-            input_disc_1 = merge_concatenate([input_disc_1_seg, model_input],
-                                             axis=1)
-            out_disc_0 = disc_0(input_disc_0)
-            out_disc_1 = disc_1(input_disc_1)
-            
-            # Create untrainable segmentation generator output.
-            model_gen = Model(inputs=model_input,
-                              outputs=[lesion_output, liver_output])
-            make_trainable(model_gen, False)
-            outputs_gen = model_gen(model_input)
-            
-            # Create discriminator outputs for training the discriminators.
-            input_disc_0 = merge_concatenate([outputs_gen[0], model_input],
-                                              axis=1)
-            input_disc_1 = merge_concatenate([outputs_gen[1], model_input],
-                                              axis=1)
-            out_adv_0_d = disc_0(input_disc_0)
-            out_adv_1_d = disc_1(input_disc_1)
-            
-            # Make discriminators untrainable, generator trainable.
-            make_trainable(model_gen, True)
-            make_trainable(disc_0, False)
-            make_trainable(disc_1, False)
-            
-            # Create discriminator outputs for training the generator.
-            outputs_gen = model_gen(model_input)
-            input_disc_0 = merge_concatenate([outputs_gen[0], model_input],
-                                              axis=1)
-            input_disc_1 = merge_concatenate([outputs_gen[1], model_input],
-                                              axis=1)
-            out_adv_0_g = disc_0(input_disc_0)
-            out_adv_1_g = disc_1(input_disc_1)
-            
-            # Name the outputs.
-            def name_layer(tensor, name):
-                return Activation('linear', name=name)(tensor)
-            out_adv_0_d = name_layer(out_adv_0_d, 'out_adv_0_d')
-            out_adv_1_d = name_layer(out_adv_1_d, 'out_adv_1_d')
-            out_adv_0_g = name_layer(out_adv_0_g, 'out_adv_0_g')
-            out_adv_1_g = name_layer(out_adv_1_g, 'out_adv_1_g')
-            out_disc_0 = name_layer(out_disc_0, 'out_disc_0')
-            out_disc_1 = name_layer(out_disc_1, 'out_disc_1')
-        
-        # Create aggregate model
-        if adversarial:
-            model = Model( \
-                inputs=[model_input,
-                        input_disc_0_seg,
-                        input_disc_1_seg],
-                outputs=[lesion_output, liver_output,
-                         out_adv_0_d, out_adv_1_d,
-                         out_adv_0_g, out_adv_1_g,
-                         out_disc_0, out_disc_1])
-        else:
-            model = Model(inputs=model_input,
-                          outputs=[lesion_output, liver_output])
-        
-        return model
+    else:
+        liver_output = Activation('linear',
+                                  name='output_1')(liver_output_pre)
     
-    if multi_slice:
-        assert(model_kwargs['ndim']==3)
+    # Lesion classifier output
+    model_lesion.name = 'output_0'
+    lesion_output = model_lesion(lesion_input)
+    
+    # Create discriminators
+    if adversarial:
+        def make_trainable(model, trainable=True):
+            for l in model.layers:
+                if isinstance(l, Model):
+                    make_trainable(l, trainable)
+                else:
+                    l.trainable = trainable
         
-        # Assemble base model.
-        input_shape = model_kwargs['input_shape']
-        input_shape_2D = (input_shape[0],)+input_shape[2:]
-        model_kwargs_2D = copy.copy(model_kwargs)
-        model_kwargs_2D['ndim'] = 2
-        model_kwargs_2D['input_shape'] = input_shape_2D
-        base_model = assemble_base_model(**model_kwargs_2D)
+        # Assemble discriminators.
+        disc_0 = assemble_cnn(**discriminator_kwargs)
+        disc_1 = assemble_cnn(**discriminator_kwargs)
         
-        # Instantiate parallel models, sharing weights.
-        # NOTE: batch norm statistics are shared!
-        input_multi_slice = Input(input_shape)
-        lesion_output_pre = []
-        liver_output_pre = []
-        z_axis = 2
-        def select(i):
-            return Lambda(lambda x: x[:,:,i,:,:], output_shape=input_shape_2D)
-        def expand():
-            output_shape = (model_kwargs['input_num_filters'],
-                            1,)+input_shape_2D[1:]
-            return Lambda(lambda x: K.expand_dims(x, axis=z_axis),
-                          output_shape=output_shape)
-        for i in range(3):
-            out_0, out_1 = base_model(select(i)(input_multi_slice))
-            lesion_output_pre.append(expand()(out_0))
-            liver_output_pre.append(expand()(out_1))
-        lesion_output_pre = merge_concatenate(lesion_output_pre, axis=z_axis)
-        liver_output_pre = merge_concatenate(liver_output_pre, axis=z_axis)
-        if ms_ndim_out==2:
-            flat_shape = (model_kwargs['input_num_filters']*3,)\
-                         +input_shape_2D[1:]
-            lesion_output_pre = Reshape(flat_shape)(lesion_output_pre)
-            liver_output_pre = Reshape(flat_shape)(liver_output_pre)
+        # Create discriminator outputs for real data.
+        input_disc_0_seg = Input(input_shape, name='input_disc_0_seg')
+        input_disc_1_seg = Input(input_shape, name='input_disc_1_seg')
+        input_disc_0 = merge_concatenate([input_disc_0_seg, model_input],
+                                         axis=1)
+        input_disc_1 = merge_concatenate([input_disc_1_seg, model_input],
+                                         axis=1)
+        out_disc_0 = disc_0(input_disc_0)
+        out_disc_1 = disc_1(input_disc_1)
         
-        # Add convolutions to combine information across slices.
-        nonlinearity = model_kwargs['nonlinearity']
-        lesion_output_pre = Convolution( \
-            filters=model_kwargs['input_num_filters'],
-            kernel_size=3,
-            ndim=ms_ndim_out,
-            padding='same',
-            weight_norm=model_kwargs['weight_norm'],
-            kernel_regularizer=_l2(model_kwargs['weight_decay']),
-            name='conv_3D_0')(lesion_output_pre)
-        lesion_output_pre = get_nonlinearity(nonlinearity)(lesion_output_pre)
-        liver_output_pre = Convolution( \
-            filters=model_kwargs['input_num_filters'],
-            kernel_size=3,
-            ndim=ms_ndim_out,
-            padding='same',
-            weight_norm=model_kwargs['weight_norm'],
-            kernel_regularizer=_l2(model_kwargs['weight_decay']),
-            name='conv_3D_1')(liver_output_pre)
-        liver_output_pre = get_nonlinearity(nonlinearity)(liver_output_pre)
+        # Create untrainable segmentation generator output.
+        model_gen = Model(inputs=model_input,
+                            outputs=[lesion_output, liver_output])
+        make_trainable(model_gen, False)
+        outputs_gen = model_gen(model_input)
         
-        # Create classifier for lesion.
+        # Create discriminator outputs for training the discriminators.
+        input_disc_0 = merge_concatenate([outputs_gen[0], model_input],
+                                         axis=1)
+        input_disc_1 = merge_concatenate([outputs_gen[1], model_input],
+                                         axis=1)
+        out_adv_0_d = disc_0(input_disc_0)
+        out_adv_1_d = disc_1(input_disc_1)
+        
+        # Make discriminators untrainable, generator trainable.
+        make_trainable(model_gen, True)
+        make_trainable(disc_0, False)
+        make_trainable(disc_1, False)
+        
+        # Create discriminator outputs for training the generator.
+        outputs_gen = model_gen(model_input)
+        input_disc_0 = merge_concatenate([outputs_gen[0], model_input],
+                                         axis=1)
+        input_disc_1 = merge_concatenate([outputs_gen[1], model_input],
+                                         axis=1)
+        out_adv_0_g = disc_0(input_disc_0)
+        out_adv_1_g = disc_1(input_disc_1)
+        
+        # Name the outputs.
+        def name_layer(tensor, name):
+            return Activation('linear', name=name)(tensor)
+        out_adv_0_d = name_layer(out_adv_0_d, 'out_adv_0_d')
+        out_adv_1_d = name_layer(out_adv_1_d, 'out_adv_1_d')
+        out_adv_0_g = name_layer(out_adv_0_g, 'out_adv_0_g')
+        out_adv_1_g = name_layer(out_adv_1_g, 'out_adv_1_g')
+        out_disc_0 = name_layer(out_disc_0, 'out_disc_0')
+        out_disc_1 = name_layer(out_disc_1, 'out_disc_1')
+    
+    # Create aggregate model
+    if adversarial:
+        model = Model( \
+            inputs=[model_input,
+                    input_disc_0_seg,
+                    input_disc_1_seg],
+            outputs=[lesion_output, liver_output,
+                     out_adv_0_d, out_adv_1_d,
+                     out_adv_0_g, out_adv_1_g,
+                     out_disc_0, out_disc_1])
+    else:
+        model = Model(inputs=model_input,
+                      outputs=[lesion_output, liver_output])
+    
+    return model
+    
+    
+def assemble_model_multi_slice(ms_ndim_out=3, **model_kwargs):
+    assert(model_kwargs['ndim']==3)
+    
+    # Assemble base model.
+    input_shape = model_kwargs['input_shape']
+    input_shape_2D = (input_shape[0],)+input_shape[2:]
+    model_kwargs_2D = copy.copy(model_kwargs)
+    model_kwargs_2D['ndim'] = 2
+    model_kwargs_2D['input_shape'] = input_shape_2D
+    base_model = assemble_base_model(**model_kwargs_2D)
+    
+    # Instantiate parallel models, sharing weights.
+    # NOTE: batch norm statistics are shared!
+    input_multi_slice = Input(input_shape)
+    lesion_output_pre = []
+    liver_output_pre = []
+    z_axis = 2
+    def select(i):
+        return Lambda(lambda x: x[:,:,i,:,:], output_shape=input_shape_2D)
+    def expand():
+        output_shape = (model_kwargs['input_num_filters'],
+                        1,)+input_shape_2D[1:]
+        return Lambda(lambda x: K.expand_dims(x, axis=z_axis),
+                      output_shape=output_shape)
+    for i in range(3):
+        out_0, out_1 = base_model(select(i)(input_multi_slice))
+        lesion_output_pre.append(expand()(out_0))
+        liver_output_pre.append(expand()(out_1))
+    lesion_output_pre = merge_concatenate(lesion_output_pre, axis=z_axis)
+    liver_output_pre = merge_concatenate(liver_output_pre, axis=z_axis)
+    if ms_ndim_out==2:
+        flat_shape = (model_kwargs['input_num_filters']*3,)\
+                     +input_shape_2D[1:]
+        lesion_output_pre = Reshape(flat_shape)(lesion_output_pre)
+        liver_output_pre = Reshape(flat_shape)(liver_output_pre)
+    
+    # Add convolutions to combine information across slices.
+    nonlinearity = model_kwargs['nonlinearity']
+    lesion_output_pre = Convolution( \
+        filters=model_kwargs['input_num_filters'],
+        kernel_size=3,
+        ndim=ms_ndim_out,
+        padding='same',
+        weight_norm=model_kwargs['weight_norm'],
+        kernel_regularizer=_l2(model_kwargs['weight_decay']),
+        name='conv_3D_0')(lesion_output_pre)
+    lesion_output_pre = get_nonlinearity(nonlinearity)(lesion_output_pre)
+    liver_output_pre = Convolution( \
+        filters=model_kwargs['input_num_filters'],
+        kernel_size=3,
+        ndim=ms_ndim_out,
+        padding='same',
+        weight_norm=model_kwargs['weight_norm'],
+        kernel_regularizer=_l2(model_kwargs['weight_decay']),
+        name='conv_3D_1')(liver_output_pre)
+    liver_output_pre = get_nonlinearity(nonlinearity)(liver_output_pre)
+    
+    # Create classifier for lesion.
+    if model_kwargs['num_classes'] is not None:
         lesion_output = Convolution(filters=1, kernel_size=1,
                           ndim=ms_ndim_out,
                           activation='linear',
@@ -327,8 +328,12 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
             lesion_output_layer = Permute((4,1,2,3))
         lesion_output_layer.name = 'output_0'
         lesion_output = lesion_output_layer(lesion_output)
-                
-        # Create classifier for liver.
+    else:
+        lesion_output = Activation('linear',
+                                   name='output_0')(lesion_output_pre)
+            
+    # Create classifier for liver.
+    if model_kwargs['num_classes'] is not None:
         liver_output = Convolution(filters=1, kernel_size=1,
                           ndim=ms_ndim_out,
                           activation='linear',
@@ -346,12 +351,59 @@ def assemble_model(two_levels=False, num_residuals_bottom=None,
             liver_output_layer = Permute((4,1,2,3))
         liver_output_layer.name = 'output_1'
         liver_output = liver_output_layer(liver_output)
-        
-        # Final model.
-        model = Model(inputs=input_multi_slice,
-                      outputs=[lesion_output, liver_output])
-        return model
+    else:
+        liver_output = Activation('linear',
+                                  name='output_1')(liver_output_pre)
     
+    # Final model.
+    model = Model(inputs=input_multi_slice,
+                  outputs=[lesion_output, liver_output])
+    return model
+                 
+
+def assemble_model(model_type='two_levels', num_residuals_bottom=None,
+                   ms_ndim_out=3, discriminator_kwargs=None, **model_kwargs):
+    # Model types: two_levels, adversarial, multi_slice, simple
+    # (`num_residuals_bottom` only used with two_levels)
+    # (`ms_ndim_out` only used with multi_slice)
+    # (`discriminator_kwargs` only used with adversarial)
+    if model_type=='two_levels':
+        '''
+        Two FCNs: FCN_0 and FCN_1. Both have an output. FCN_1 takes as input 
+        both the model input and the pre-classifier hidden representation of 
+        FCN_0.
+        '''
+        model = assemble_model_two_levels(
+            adversarial=False,
+            num_residuals_bottom=num_residuals_bottom,
+            **model_kwargs)
+    if model_type=='adversarial':
+        '''
+        A two_levels model with a discriminator on each output, implementing
+        an adversarial loss.
+        '''
+        model = assemble_model_two_levels(
+            adversarial=True,
+            num_residuals_bottom=num_residuals_bottom,
+            discriminator_kwargs=discriminator_kwargs,
+            **model_kwargs)
+    if model_type=='multi_slice':
+        '''
+        A two_levels model that takes multiple slices as input and outputs one
+        or or multiple slices as output. Via a convolution, combines 
+        information across slices at the pre-classifier layer for each output.
+        '''
+        model = assemble_model_multi_slice(
+            ms_ndim_out=ms_ndim_out,
+            **model_kwargs)
+    if model_type=='simple':
+        '''
+        A single FCN.
+        '''
+        model = assemble_cycled_model(**model_kwargs)
+        
+    return model
+
     
 def freeze_weights(model):
     def freeze(model):

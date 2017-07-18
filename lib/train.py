@@ -477,10 +477,33 @@ def run(general_settings,
             print(key, ":", d[key])
         print("")
         
-    if 'adversarial' in model_kwargs:
-        adversarial = model_kwargs['adversarial']
+    '''
+    Model type - backward compatibility in argument passing style.
+    '''
+    if not 'model_type' in model_kwargs:
+        if 'two_levels' in model_kwargs:
+            if model_kwargs.pop('two_levels')==True:
+                model_kwargs['model_type'] = 'two_levels'
+        if 'adversarial' in model_kwargs:
+            # This check must follow 'two_levels' as 'adversarial' supercedes
+            # the former.
+            if model_kwargs.pop('adversarial')==True:
+                model_kwargs['model_type'] = 'adversarial'
+        if 'multi_slice' in model_kwargs:
+            # This check must be last since a 'multi_slice' model cannot be
+            # adversarial but is based on a 'two_levels' model.
+            if model_kwargs.pop('multi_slice')==True:
+                model_kwargs['model_type'] = 'multi_slice'
+    if not 'model_type' in model_kwargs:
+        # Still not in the dictionary - this is a simple model.
+        model_kwargs['model_type'] = 'simple'
+    
+    # Adversarial?
+    if model_kwargs['model_type']=='adversarial':
+        adversarial = True
     else:
         adversarial = False
+    
 
     '''
     Set up experiment directory
@@ -592,5 +615,4 @@ def run(general_settings,
           data_gen_kwargs=data_gen_kwargs,
           data_augmentation_kwargs=data_augmentation_kwargs,
           initial_epoch=initial_epoch,
-          adversarial=adversarial,
           **train_kwargs)
