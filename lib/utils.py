@@ -158,11 +158,81 @@ def data_generator(data_path, volume_indices, batch_size,
     return data_gen
 
 
+class volume_generator(object):
+    def __init__(self, data_path, volume_indices,
+                 nb_io_workers=1, nb_proc_workers=0, downscale=False, 
+                 return_vol_idx=False, num_consecutive=None):
+        self.data_path = data_path
+        self.volume_indices = volume_indices
+        self.nb_io_workers = nb_io_workers
+        self.nb_proc_workers = nb_proc_workers
+        self.downscale = downscale
+        self.return_vol_idx = return_vol_idx
+        self.num_consecutive = num_consecutive
+        
+        try:
+            zgroup = zarr.open_group(data_path, mode='r')
+        except:
+            print("Failed to open data: {}".format(data_path))
+            raise
+        
+        # Assemble volumes and corresponding segmentations
+        self.volumes = []
+        self.segmentations = []
+        for idx in self.volume_indices:
+            subgroup = zgroup[str(idx)]
+            self.volumes.append(subgroup['volume'])
+            self.segmentations.append(subgroup['segmentation'])
+        
+        # Length
+        self.num_volumes = len(self.volumes)
+        assert(len(self.segmentations)==self.num_volumes)
+            
+    def __len__(self):
+        return self.num_volumes
+    
+    def preprocess(self, batch):
+        b0, b1 = batch
+        if self.downscale:
+            b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
+            b1 = resize_stack(b1, size=(256, 256), interp='nearest')
+        b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
+            
+        # standardize
+        b0 /= 255.0
+        b0 = np.clip(b0, -2.0, 2.0)
+        
+        return (b0, b1)
+    
+    def flow(self):
+        for i in range(self.num_volumes):
+            batch = [self.volumes[i], self.segmentations[i]]
+            if self.num_consecutive is not None:
+                batch = (consecutive_slice_view(
+                               batch[0], num_consecutive=self.num_consecutive),
+                         consecutive_slice_view(
+                               batch[1], num_consecutive=self.num_consecutive))
+            data_gen = data_flow(data=batch,
+                                 batch_size=1,
+                                 nb_io_workers=self.nb_io_workers,
+                                 nb_proc_workers=self.nb_proc_workers,
+                                 shuffle=False, 
+                                 loop_forever=False,
+                                 preprocessor=self.preprocess)
+            batch = next(data_gen.flow())
+            #batch = self.preprocess(batch)
+            if self.return_vol_idx:
+                batch = (batch[0], batch[1], self.volume_indices[i])
+            yield batch
+
+
 def repeat_flow(flow, num_outputs, adversarial=False):
     """
     Return a tuple with the ground truth repeated a custom number of times.
     """
+    assert(num_outputs>=1)
     for batch in flow:
+        assert(len(batch)>=2)
         inputs = [batch[0]]
         outputs = []
         for i in range(num_outputs):
@@ -183,8 +253,8 @@ def repeat_flow(flow, num_outputs, adversarial=False):
             inputs = inputs[0]
         if len(outputs)==1:
             outputs = outputs[0]
-        
-        yield (inputs, outputs)
+            
+        yield (inputs, outputs)+batch[2:]
         
 
 def load_and_freeze_weights(model, load_path, freeze=True, verbose=True,
