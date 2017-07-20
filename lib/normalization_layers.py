@@ -60,13 +60,15 @@ class LayerNorm(Layer):
                                         constraint=self.beta_constraint)
         else:
             self.beta = None
+        self._input_shape = input_shape
         super(LayerNorm, self).build(input_shape)
 
     def call(self, x):
         this_mean = K.mean(x, axis=self.axes, keepdims=True)
         this_var = K.var(x, axis=self.axes, keepdims=True)
         ret = (x - this_mean) / (this_var + K.epsilon())
-        input_shape = K.int_shape(x)
+        #input_shape = K.int_shape(x)
+        input_shape = self._input_shape     # HACK: recurrentshop workaround
         dim_pattern = ['x'] * len(input_shape)
         dim_pattern[self.n_out_idx] = 0
         dim_pattern = tuple(dim_pattern)

@@ -5,12 +5,19 @@ from keras.layers import (Input,
                           BatchNormalization,
                           Lambda,
                           Dense,
-                          Reshape)
+                          Reshape,
+                          ConvLSTM2D,
+                          Bidirectional,
+                          TimeDistributed)
 from keras.layers.merge import concatenate as merge_concatenate
+from keras.layers.merge import multiply as merge_multiply
+from keras.layers.merge import add as merge_add
 from keras.models import Model
 from keras import backend as K
 from .model import assemble_model as assemble_cycled_model
-from .model import _l2, _unique, _softmax
+from .model import (_l2,
+                    _unique,
+                    _softmax)
 from .callbacks import Dice
 from .loss import dice_loss
 from .blocks import (Convolution,
@@ -359,11 +366,154 @@ def assemble_model_multi_slice(ms_ndim_out=3, **model_kwargs):
     model = Model(inputs=input_multi_slice,
                   outputs=[lesion_output, liver_output])
     return model
+
+
+class Bidirectional_(Bidirectional):
+    def __init__(self, layer, merge_mode='concat', weights=None,
+                 custom_objects=None, **kwargs):
+        super(Bidirectional, self).__init__(layer, **kwargs)
+        if merge_mode not in ['sum', 'mul', 'ave', 'concat', None]:
+            raise ValueError('Invalid merge mode. '
+                             'Merge mode should be one of '
+                             '{"sum", "mul", "ave", "concat", None}')
+        self.forward_layer = copy.copy(layer)
+        config = layer.get_config()
+        config['go_backwards'] = not config['go_backwards']
+        self.backward_layer = layer.__class__.from_config(
+                                         config, custom_objects=custom_objects)
+        self.forward_layer.name = 'forward_' + self.forward_layer.name
+        self.backward_layer.name = 'backward_' + self.backward_layer.name
+        self.merge_mode = merge_mode
+        if weights:
+            nw = len(weights)
+            self.forward_layer.initial_weights = weights[:nw // 2]
+            self.backward_layer.initial_weights = weights[nw // 2:]
+        self.stateful = layer.stateful
+        self.return_sequences = layer.return_sequences
+        self.supports_masking = True
+    
+    
+def assemble_model_lstm(input_shape, num_filters, num_classes, 
+                        normalization=LayerNorm, norm_kwargs=None,
+                        weight_norm=False, num_outputs=1,
+                        weight_decay=0.0005, init='he_normal'):
+    from recurrentshop import RecurrentModel
+    assert(num_outputs==1)
+        
+    if norm_kwargs is None:
+        norm_kwargs = {}
+
+    # Inputs
+    model_input = Input(batch_shape=input_shape, name='model_input')
+    input_t = Input(batch_shape=(input_shape[0],)+input_shape[2:])
+    hidden_input_t = Input(batch_shape=(input_shape[0],
+                                        num_filters)+input_shape[3:])
+    
+    # Common convolution kwargs.
+    convolution_kwargs = {'filters': num_filters,
+                          'kernel_size': 3,
+                          'ndim': 2,
+                          'padding': 'same',
+                          'weight_norm': weight_norm,
+                          'kernel_initializer': init}
+    
+    # LSTM input.
+    x_t = Convolution(**convolution_kwargs,
+                      kernel_regularizer=_l2(weight_decay),
+                      activation='relu',
+                      name=_unique('conv_x'))(input_t)
+    if normalization is not None:
+        x_t = normalization(**norm_kwargs)(x_t)
+    
+    # LSTM block.
+    gate_replace_x = Convolution(**convolution_kwargs,
+                                 kernel_regularizer=_l2(weight_decay),
+                                 activation='sigmoid',
+                                 name=_unique('conv_gate_replace'))(x_t)
+    #if normalization is not None:
+        #gate_replace_x = normalization(**norm_kwargs)(gate_replace_x)
+    gate_replace_h = Convolution(**convolution_kwargs,
+                                 kernel_regularizer=_l2(weight_decay),
+                                 activation='sigmoid',
+                             name=_unique('conv_gate_replace'))(hidden_input_t)
+    #if normalization is not None:
+        #gate_replace_h = normalization(**norm_kwargs)(gate_replace_h)
+    gate_replace = merge_add([gate_replace_x, gate_replace_h])
+        
+    gate_read_x = Convolution(**convolution_kwargs,
+                              kernel_regularizer=_l2(weight_decay),
+                              activation='sigmoid',
+                              name=_unique('conv_gate_read'))(x_t)
+    #if normalization is not None:
+        #gate_read_x = normalization(**norm_kwargs)(gate_read_x)
+    gate_read_h = Convolution(**convolution_kwargs,
+                              kernel_regularizer=_l2(weight_decay),
+                              activation='sigmoid',
+                              name=_unique('conv_gate_read'))(hidden_input_t)
+    #if normalization is not None:
+        #gate_read_h = normalization(**norm_kwargs)(gate_read_h)
+    gate_read = merge_add([gate_read_x, gate_read_h])
+        
+    hidden_read_t = merge_multiply([gate_read, hidden_input_t])
+    #if normalization is not None:
+        #hidden_read_t = normalization(**norm_kwargs)(hidden_read_t)
+        
+    mix_t_pre = merge_concatenate([x_t, hidden_read_t], axis=1)
+    mix_t = Convolution(**convolution_kwargs,
+                        kernel_regularizer=_l2(weight_decay),
+                        activation='tanh',
+                        name=_unique('conv_mix'))(mix_t_pre)
+    #if normalization is not None:
+        #mix_t = normalization(**norm_kwargs)(mix_t)
+        
+    lambda_inputs = [mix_t, hidden_input_t, gate_replace]
+    hidden_t = Lambda(function=lambda ins: ins[2]*ins[0] + (1-ins[2])*ins[1],
+                      output_shape=lambda x:x[0])(lambda_inputs)
+    
+    # LSTM output.
+    out_t = Convolution(**convolution_kwargs,
+                        kernel_regularizer=_l2(weight_decay),
+                        activation='relu',
+                        name=_unique('conv_out'))(hidden_t)
+    class_convolution_kwargs = copy.copy(convolution_kwargs)
+    class_convolution_kwargs['filters'] = num_classes
+    out_t = Convolution(**class_convolution_kwargs,
+                        kernel_regularizer=_l2(weight_decay),
+                        activation='linear',
+                        name=_unique('conv_out'))(hidden_t)
+    #if normalization is not None:
+        #out_t = normalization(**norm_kwargs)(out_t)
+    
+    # Classifier.
+    out_t = Permute((2,3,1))(out_t)
+    if num_classes==1:
+        out_t = Activation('sigmoid')(out_t)
+    else:
+        out_t = Activation(_softmax)(out_t)
+    out_t = Permute((3,1,2))(out_t)
+    
+    # Make it a recurrent block.
+    #
+    # NOTE: a bidirectional 'stateful' LSTM has states passed between blocks
+    # of the reverse path in non-temporal order. Only the forward pass is
+    # stateful in sequential/temporal order.
+    cobject = {LayerNorm.__name__: LayerNorm}
+    output_layer = Bidirectional_(RecurrentModel(input=input_t,
+                                               initial_states=[hidden_input_t],
+                                               output=out_t,
+                                               final_states=[hidden_t],
+                                               stateful=True,
+                                               return_sequences=True),
+                                  merge_mode='sum',
+                                  custom_objects=cobject)
+    output_layer.name = 'output_0'
+    model = Model(inputs=model_input, outputs=output_layer(model_input))
+    return model
                  
 
 def assemble_model(model_type='two_levels', num_residuals_bottom=None,
                    ms_ndim_out=3, discriminator_kwargs=None, **model_kwargs):
-    # Model types: two_levels, adversarial, multi_slice, simple
+    # Model types: two_levels, adversarial, multi_slice, lstm, simple
     # (`num_residuals_bottom` only used with two_levels)
     # (`ms_ndim_out` only used with multi_slice)
     # (`discriminator_kwargs` only used with adversarial)
@@ -396,6 +546,11 @@ def assemble_model(model_type='two_levels', num_residuals_bottom=None,
         model = assemble_model_multi_slice(
             ms_ndim_out=ms_ndim_out,
             **model_kwargs)
+    if model_type=='lstm':
+        '''
+        A simple, stateful, 2D convolutional LSTM.
+        '''
+        model = assemble_model_lstm(**model_kwargs)
     if model_type=='simple':
         '''
         A single FCN.

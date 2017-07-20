@@ -66,6 +66,8 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
     '''
     gen = {}
     print(' > Preparing data generators...')
+    if 'recurrent' in data_gen_kwargs:
+        data_gen_kwargs['model'] = model
     gen['train'] = data_generator(volume_indices=volume_indices['train'],
                                   batch_size=batch_size,
                                   shuffle=True,

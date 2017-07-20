@@ -2,12 +2,16 @@ import zarr
 import h5py
 from skimage import transform
 import numpy as np
+import threading
+
+from keras import backend as K
+from keras.initializers import he_normal
+
 from data_tools.data_augmentation import random_transform
 from data_tools.io import data_flow
 from data_tools.wrap import (multi_source_array,
                              delayed_view)
-from keras import backend as K
-from keras.initializers import he_normal
+
 
 
 def resize_stack(arr, size, interp='bilinear'):
@@ -84,7 +88,9 @@ def data_generator(data_path, volume_indices, batch_size,
                    nb_io_workers=1, nb_proc_workers=0,
                    shuffle=False, loop_forever=False, downscale=False,
                    transform_kwargs=None, data_flow_kwargs=None,
-                   align_intensity=False, num_consecutive=None, rng=None):
+                   align_intensity=False, num_consecutive=None,
+                   recurrent=False, truncate_every=3, rng=None,
+                   **kwargs):
     """
     Open data files, wrap data for access, and set up proprocessing; then,
     initialize the generic data_flow.
@@ -126,36 +132,206 @@ def data_generator(data_path, volume_indices, batch_size,
     
     # Function to rescale the data and do data augmentation, if requested
     def preprocessor(batch):
-        b0, b1 = batch
-        if align_intensity:
-            mean_liver = np.mean(b0[b1==1])
-            b0 += 100 - mean_liver
-        if downscale:
-            b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
-            b1 = resize_stack(b1, size=(256, 256), interp='nearest')
-        b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
-        if transform_kwargs is not None:
-            for idx0, idx1 in zip(np.ndindex(b0.shape[:-3]),
-                                  np.ndindex(b1.shape[:-3])):
-                x, y = random_transform(b0[idx0], b1[idx1], **transform_kwargs)
-                b0[idx0], b1[idx1] = x, y
-        # standardize
-        b0 /= 255.0
-        b0 = np.clip(b0, -2.0, 2.0)
-        return (b0, b1)
+        ret_batch = []
+        for i, j in zip(range(0, len(batch), 2), range(1, len(batch), 2)):
+            b0, b1 = batch[i], batch[j]
+            if align_intensity:
+                mean_liver = np.mean(b0[b1==1])
+                b0 += 100 - mean_liver
+            if downscale:
+                b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
+                b1 = resize_stack(b1, size=(256, 256), interp='nearest')
+            b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
+            if transform_kwargs is not None:
+                for idx0, idx1 in zip(np.ndindex(b0.shape[:-3]),
+                                    np.ndindex(b1.shape[:-3])):
+                    x, y = random_transform(b0[idx0], b1[idx1], **transform_kwargs)
+                    # TODO properly pass rng to random_transform
+                    b0[idx0], b1[idx1] = x, y
+            # standardize
+            b0 /= 255.0
+            b0 = np.clip(b0, -2.0, 2.0)
+            ret_batch.extend([b0, b1])
+        return tuple(ret_batch)
     
     # Prepare the data iterator
     if data_flow_kwargs is None:
         data_flow_kwargs = {}
-    data_gen = data_flow(data=[msa_vol, msa_seg],
-                         batch_size=batch_size,
-                         nb_io_workers=nb_io_workers,
-                         nb_proc_workers=nb_proc_workers,
-                         shuffle=shuffle, 
-                         loop_forever=loop_forever,
-                         preprocessor=preprocessor,
-                         rng=rng)
+    if recurrent:
+        data_gen = recurrent_generator(data=[volumes, segmentations],
+                                       batch_size=batch_size,
+                                       truncate_every=truncate_every,
+                                       nb_io_workers=nb_io_workers,
+                                       nb_proc_workers=nb_proc_workers,
+                                       shuffle=shuffle, 
+                                       loop_forever=loop_forever,
+                                       rng=rng, **kwargs)
+    else:
+        data_gen = data_flow(data=[msa_vol, msa_seg],
+                             batch_size=batch_size,
+                             nb_io_workers=nb_io_workers,
+                             nb_proc_workers=nb_proc_workers,
+                             shuffle=shuffle, 
+                             loop_forever=loop_forever,
+                             preprocessor=preprocessor,
+                             rng=rng, **kwargs)
     return data_gen
+
+
+class wrap_zeros(delayed_view):
+    """
+    Wraps an array in a zero-filled array that is larger in only the first
+    dimension. Data in the first array is only accessed on demaind; zeros
+    are not pre-generated.
+    """
+    def __init__(self, arr, length, idx_min=None, idx_max=None,
+                 *args, **kwargs):
+        super(wrap_zeros, self).__init__(arr, idx_min=idx_min, idx_max=idx_max,
+                                         *args, **kwargs)
+        arr_length = len(arr)
+        if idx_max is not None:
+            arr_length -= arr_length-idx_max
+        if idx_min is not None:
+            arr_length -= idx_min
+        if length < arr_length:
+            raise ValueError("The specified length ({})is smaller than the "
+                             "length of the given array ({})."
+                             "".format(length, arr_length))
+        self.length = length
+        self.num_items = length
+        self.shape = (length,)+self.shape[1:]
+        
+    def _get_element(self, int_key, key_remainder=None):
+        if not isinstance(int_key, (int, np.integer)):
+            raise IndexError("cannot index with {}".format(type(int_key)))
+        if int_key > len(self.arr_indices) and int_key < self.length:
+            elem = np.zeros(self.shape[1:], dtype=self.dtype)
+            if key_remainder is not None:
+                elem = elem[key_remainder]
+            return elem
+        idx = self.arr_indices[int_key]
+        if key_remainder is not None:
+            idx = (idx,)+key_remainder
+        idx = int(idx)  # Some libraries don't like np.integer            
+        return self.arr[idx]
+
+
+class recurrent_generator(object):
+    """
+    Used for a stateful recurrent model.
+    
+    Index volumes in shuffled order, then flow over sequential slices in
+    the volumes.
+    """
+    def __init__(self, data, batch_size, truncate_every, model,
+                 shuffle=False, loop_forever=False, rng=None,
+                 **data_flow_kwargs):
+        self.data = data
+        self.batch_size = batch_size
+        self.truncate_every = truncate_every
+        self.model = model
+        self.shuffle = shuffle
+        self.loop_forever = loop_forever
+        self.rng = rng
+        if self.rng is None:
+            self.rng = np.random.RandomState()
+        self.data_flow_kwargs = data_flow_kwargs
+                
+        self.num_samples = len(data[0])
+        for d in self.data:
+            assert(len(d)==self.num_samples)
+        
+        #self.num_batches = self.num_samples//self.batch_size
+        #if self.num_samples%self.batch_size > 0:
+            #self.num_batches += 1
+        self.num_batches = 1000 # HACK
+        
+        self.reset_states = threading.Event()
+                
+    def _flow(self):
+        stop = False
+        while not stop:
+            if self.shuffle:
+                indices = self.rng.permutation(self.num_samples)
+            else:
+                indices = range(self.num_samples)
+            bs = self.batch_size
+            for i0, i1 in zip(range(0, len(indices), bs),
+                              range(bs, len(indices)+bs+1, bs)):
+                batch_indices = indices[i0:i1]
+                
+                # Find the largest volume length.
+                maxlen = 0
+                for vol in [self.data[0][i] for i in batch_indices]:
+                    if len(vol) > maxlen:
+                        maxlen = len(vol)
+                        
+                # Set the largest length to be a multiple of truncate_every.
+                t = self.truncate_every
+                maxlen = ((maxlen+t-1)//t)*t
+                
+                # Assemble batch data.
+                data = []
+                for idx in batch_indices:
+                    data_i = [wrap_zeros(d[idx], maxlen) for d in self.data]
+                    data.extend(data_i)
+                    
+                # Iterate slice-wise through the volumes.
+                data_gen_slice = data_flow(data=data,
+                                           batch_size=self.truncate_every,
+                                           shuffle=False,
+                                           loop_forever=False,
+                                           rng=self.rng,
+                                           **self.data_flow_kwargs)
+                for bn, slice_batch in enumerate(data_gen_slice.flow()):
+                    # Reshape - first dimension is batch dim.
+                    batch = []
+                    for i in range(len(self.data)):
+                        d_arr = np.zeros((bs,)+np.shape(slice_batch[i]),
+                                         dtype=slice_batch[i].dtype)
+                        for j, k in enumerate(range(i,
+                                                    len(slice_batch), 
+                                                    len(self.data))):
+                            d_arr[j] = slice_batch[k]
+                        batch.append(d_arr)
+                    if i0==0 and bn==0:
+                        # First slice batch of this batch of volumes.
+                        self.reset_states.set()
+                    else:
+                        self.reset_states.clear()
+                    yield tuple(batch)
+            if not self.loop_forever:
+                stop = True
+                
+    def flow(self):
+        model = self.model
+        flow = self._flow()
+        reset_states = self.reset_states    # threading.Event
+        
+        # Generator that resets model state when needed but only after a batch
+        # is requested and before it is yielded, so that the model is idle at
+        # this time. This wrapper makes heavy use of closures.
+        class generator_wrapper(object):
+            def __iter__(self):
+                return self
+            def __next__(self):
+                try:
+                    batch = next(flow)
+                    if reset_states.is_set():
+                        model.reset_states()
+                        reset_states.clear()
+                    return batch
+                except StopIteration:
+                    raise
+            def next(self):
+                return self.__next__()
+            
+        gen = generator_wrapper()
+        for batch in gen:
+            yield batch
+                
+    def __len__(self):
+        return self.num_batches
 
 
 class volume_generator(object):
