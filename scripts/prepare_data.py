@@ -82,9 +82,6 @@ def create_dataset(save_name, save_dir, data_dir, proportions):
         volume_np = volume_np[slices]
         seg_np = seg_np[slices]
 
-        # Sanity check
-        # save_slices(seg_np)
-        
         if len(volume_np)==0:
             print("WARNING! Skipping empty volume #{}".format(i))
             continue
@@ -104,17 +101,17 @@ if __name__=='__main__':
     data_dir = "/export/projects/Candela/datasets/lits_challenge/all/"
     save_dir = "/data/TransientData/Candela/lits_challenge/"
     
-    ## Save lesion dataset
-    #print("########## Preparing lesion dataset ##########")
-    #proportions = {0: 0., 1: 0., 2: 1.}
-    #create_dataset("data_lesions", save_dir=save_dir, data_dir=data_dir,
-                   #proportions=proportions)
+    # Save lesion dataset
+    print("########## Preparing lesion dataset ##########")
+    proportions = {0: 0., 1: 0., 2: 1.}
+    create_dataset("data_lesions", save_dir=save_dir, data_dir=data_dir,
+                   proportions=proportions)
     
-    ## Save liver dataset
-    #print("########## Preparing liver dataset ##########")
-    #proportions = {0: 0., 1: 1., 2: 1.}
-    #create_dataset("data_liver", save_dir=save_dir, data_dir=data_dir,
-                   #proportions=proportions)
+    # Save liver dataset
+    print("########## Preparing liver dataset ##########")
+    proportions = {0: 0., 1: 1., 2: 1.}
+    create_dataset("data_liver", save_dir=save_dir, data_dir=data_dir,
+                   proportions=proportions)
     
     # Save complete dataset
     print("########## Preparing complete dataset ##########")
