@@ -7,7 +7,8 @@ import numpy as np
 from scipy import ndimage
 import sys
 sys.path.append("../")
-from lib.utils import resize_stack
+from lib.utils import (resize_stack,
+                       consecutive_slice_view)
 from lib.callbacks import Dice
 from lib.loss import dice_loss
 
@@ -31,11 +32,9 @@ def parse():
     parser.add_argument('--liver_extent',
                         help="how many slices to include adjacent to the "
                              "liver",
-                        required=False, type=int,
-                        default=0)
+                        required=False, type=int, default=0)
     parser.add_argument('--many_orientations',
-                        help="average predictions over all 8 possible flips "
-                             "and rotations of each slice",
+                        help="average predictions over all 4 possible flips.",
                         required=False, action='store_true')
     parser.add_argument('--downscale',
                         help="specify whether to downscale inputs to half "
@@ -45,6 +44,9 @@ def parse():
                         help="whether to clip to predicted volumes rather "
                              "than ground truth volumes",
                         required=False, action='store_true')
+    parser.add_argument('--batch_size',
+                        help="batch size for prediction",
+                        required=False, type=int, default=32)
     return parser.parse_args()
     
     
@@ -59,7 +61,9 @@ def preprocess(volume, downscale=False):
 
 
 def postprocess(volume, downscale=False):
-    #print("values ... ", volume.min(), volume.max(), volume.mean())
+    if volume.ndim==5:
+        # consecutive slices; keep middle slice
+        volume = volume[:,:,volume.shape[2]//2,:,:]
     out = (volume >= 0.5).astype(np.int16)
     out = np.squeeze(out, axis=1)
     if downscale:
@@ -105,12 +109,12 @@ def load_model(model_path):
     def get_custom_objects(output_0_name, output_1_name):
         custom_object_list = []
         custom_object_list.append(Dice(2, output_name=output_0_name))
-        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.extend(custom_object_list[-1].get_metrics())
         custom_object_list.append(Dice(2, mask_class=0,
                                         output_name=output_0_name))
-        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.extend(custom_object_list[-1].get_metrics())
         custom_object_list.append(Dice([1, 2], output_name=output_1_name))
-        custom_object_list.append(custom_object_list[-1].get_metrics())
+        custom_object_list.extend(custom_object_list[-1].get_metrics())
         custom_object_list.append(dice_loss(2))
         custom_object_list.append(dice_loss(2, masked_class=0))
         custom_object_list.append(dice_loss([1, 2]))
@@ -138,29 +142,33 @@ def load_model(model_path):
     return model
 
 
-def predict(volume, model, many_orientations):
+def predict(volume, model, batch_size, many_orientations):
     #ops = [(lambda x:x,), (np.fliplr,), (np.flipud,), (np.fliplr, np.flipud),
            #(np.rot90,), (np.rot90, np.fliplr), (np.rot90, np.flipud),
            #(np.rot90, np.fliplr, np.flipud)]
     ops = [(lambda x:x,), (np.fliplr,), (np.flipud,), (np.fliplr, np.flipud)]
     num_ops = 4 if many_orientations else 1
     num_outputs = len(model.outputs)
-    predictions = [[] for i in range(num_outputs)]
+    predictions = [None for i in range(num_outputs)]
     for i in range(num_ops):
         op_set = ops[i]
         v = volume.T
         for op in op_set:
             v = op(v)
-        pred = model.predict(v.T)
+        pred = model.predict(v.T, batch_size=batch_size)
         if num_outputs==1:
             pred = [pred]
         for j, p in enumerate(pred):
             p = p.T
             for op in op_set[::-1]:
                 p = op(p)
-            predictions[j].append(p.T)
-    prediction = [np.mean(predictions[j], axis=0) for j in range(num_outputs)]
-    return prediction
+            if predictions[j] is None:
+                predictions[j] = p.T
+            else:
+                predictions[j] += p.T
+    for j in range(len(predictions)):
+        predictions[j] /= num_ops
+    return predictions
 
 
 if __name__=='__main__':
@@ -181,14 +189,17 @@ if __name__=='__main__':
             ldata_iter = iter([args.liver_data_files])
         else:
             ldata_iter = iter(args.liver_data_files)
-    for path in args.data_files[14:15]:
+    for path in args.data_files:
         fn = path.split('/')[-1]
         print("Processing {}".format(path))
         im_f = sitk.ReadImage(path)
         im_np = sitk.GetArrayFromImage(im_f)
-        input_volume = preprocess(im_np, downscale=args.downscale)
         model = load_model(args.model_path)
-        outputs = predict(input_volume, model, args.many_orientations)
+        if model.inputs[0].ndim==5:
+            im_np = consecutive_slice_view(im_np, num_consecutive=1)[...]
+        input_volume = preprocess(im_np, downscale=args.downscale)
+        outputs = predict(input_volume, model, args.batch_size,
+                          args.many_orientations)
         outputs = [postprocess(out,
                                downscale=args.downscale) for out in outputs]
         if ldata_iter or args.use_predicted_liver:
