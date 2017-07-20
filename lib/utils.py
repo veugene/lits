@@ -42,6 +42,7 @@ class consecutive_slice_view(delayed_view):
     def __init__(self, *args, num_consecutive, **kwargs):
         self.num_consecutive = num_consecutive
         super(consecutive_slice_view, self).__init__(*args, **kwargs)
+        self.shape = (self.shape[0], 2*num_consecutive+1,)+self.shape[1:]
         
     def _get_element(self, int_key, key_remainder=None):
         if not isinstance(int_key, (int, np.integer)):
@@ -51,8 +52,9 @@ class consecutive_slice_view(delayed_view):
             idx = (idx,)+key_remainder
         idx = int(idx)  # Some libraries don't like np.integer
         n = self.num_consecutive
-        if idx-n:
-            elem = self.arr[idx-n:idx+n+1]
+        if idx-n>0:
+            idx_end = min(idx+n+1, len(self.arr))
+            elem = self.arr[idx-n:idx_end]
             ret_arr = np.zeros((2*n+1,)+np.shape(elem)[1:], dtype=self.dtype)
             ret_arr[:len(elem)] = elem
         else:
