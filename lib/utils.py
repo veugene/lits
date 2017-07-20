@@ -107,15 +107,15 @@ def data_generator(data_path, volume_indices, batch_size,
         print("Failed to open data: {}".format(data_path))
         raise
     
-    # Assemble volumes and corresponding segmentations
+    # Assemble volumes and corresponding segmentations.
     volumes = []
     segmentations = []
     for idx in volume_indices:
         subgroup = zgroup[str(idx)]
         volumes.append(subgroup['volume'])
         segmentations.append(subgroup['segmentation'])
-    msa_vol = multi_source_array(source_list=volumes, shuffle=False)
-    msa_seg = multi_source_array(source_list=segmentations, shuffle=False)
+
+    # Wrap if requested.
     if num_consecutive is not None:
         if hasattr(num_consecutive, '__len__'):
             if len(num_consecutive)!=2:
@@ -125,14 +125,30 @@ def data_generator(data_path, volume_indices, batch_size,
             vol_num_consecutive, seg_num_consecutive = num_consecutive
         else:
             vol_num_consecutive = seg_num_consecutive = num_consecutive
-        if vol_num_consecutive is not None:
-            msa_vol = consecutive_slice_view(msa_vol,
+        
+        # Wrap all volumes and segmentations in a delayed_view that provides,
+        # for each slice, a few consecutive slices above and below.
+        volumes_c = []
+        segmentations_c = []
+        for v, s in zip(volumes, segmentations):
+            v_c = v
+            if vol_num_consecutive is not None:
+                v_c = consecutive_slice_view(v,
                                            num_consecutive=vol_num_consecutive)
-        if seg_num_consecutive is not None:
-            msa_seg = consecutive_slice_view(msa_seg,
+            volumes_c.append(v_c)
+            s_c = s
+            if seg_num_consecutive is not None:
+                s_c =consecutive_slice_view(s,
                                            num_consecutive=seg_num_consecutive)
+            segmentations_c.append(s_c)
+        volumes = volumes_c
+        segmentations = segmentations_c
+            
+    # Combine all slices in a single array.
+    msa_vol = multi_source_array(source_list=volumes, shuffle=False)
+    msa_seg = multi_source_array(source_list=segmentations, shuffle=False)
     
-    # Function to rescale the data and do data augmentation, if requested
+    # Function to rescale the data and do data augmentation, if requested.
     def preprocessor(batch):
         ret_batch = []
         for i, j in zip(range(0, len(batch), 2), range(1, len(batch), 2)):
@@ -156,7 +172,7 @@ def data_generator(data_path, volume_indices, batch_size,
             ret_batch.extend([b0, b1])
         return tuple(ret_batch)
     
-    # Prepare the data iterator
+    # Prepare the data iterator.
     if data_flow_kwargs is None:
         data_flow_kwargs = {}
     if recurrent:
