@@ -61,9 +61,6 @@ def preprocess(volume, downscale=False):
 
 
 def postprocess(volume, downscale=False):
-    if volume.ndim==5:
-        # consecutive slices; keep middle slice
-        volume = volume[:,:,volume.shape[2]//2,:,:]
     out = (volume >= 0.5).astype(np.int16)
     out = np.squeeze(out, axis=1)
     if downscale:
@@ -162,10 +159,14 @@ def predict(volume, model, batch_size, many_orientations):
             p = p.T
             for op in op_set[::-1]:
                 p = op(p)
+            p = p.T
+            if p.ndim==5:
+                # consecutive slices; keep middle slice
+                p = p[:,:,p.shape[2]//2,:,:]
             if predictions[j] is None:
-                predictions[j] = p.T
+                predictions[j] = p
             else:
-                predictions[j] += p.T
+                predictions[j] += p
     for j in range(len(predictions)):
         predictions[j] /= num_ops
     return predictions
@@ -181,7 +182,7 @@ if __name__=='__main__':
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     
-    #model = load_model(args.model_path)
+    model = load_model(args.model_path)
     
     ldata_iter = None
     if args.liver_data_files is not None:
@@ -189,12 +190,23 @@ if __name__=='__main__':
             ldata_iter = iter([args.liver_data_files])
         else:
             ldata_iter = iter(args.liver_data_files)
-    for path in args.data_files:
+    for path in sorted(args.data_files):
         fn = path.split('/')[-1]
+        if fn.endswith(".nii"):
+            fn = fn[:-4]
+        elif fn.endswith(".nii.gz"):
+            fn = fn[:-7]
+        else:
+            raise ValueError("Expecting data files to have .nii or .nii.gz "
+                             "extensions.")
+        if os.path.exists(os.path.join(args.output_dir,
+                                       fn+"_output_0.nii.gz")):
+            continue
+        
         print("Processing {}".format(path))
+
         im_f = sitk.ReadImage(path)
         im_np = sitk.GetArrayFromImage(im_f)
-        model = load_model(args.model_path)
         if model.inputs[0].ndim==5:
             im_np = consecutive_slice_view(im_np, num_consecutive=1)[...]
         input_volume = preprocess(im_np, downscale=args.downscale)
@@ -218,6 +230,6 @@ if __name__=='__main__':
             out_f.SetSpacing(im_f.GetSpacing())
             out_f.SetOrigin(im_f.GetOrigin())
             out_f.SetDirection(im_f.GetDirection())
-            filename = fn[:-4]+"_output_{}.nii.gz".format(i)
+            filename = fn+"_output_{}.nii.gz".format(i)
             sitk.WriteImage(out_f, os.path.join(args.output_dir, filename))
             
