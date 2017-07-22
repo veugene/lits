@@ -12,19 +12,26 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', "/export/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "selu/001-1"),
-    ('load_subpath', "selu/001/best_weights_ldice.hdf5"),
+    ('save_subdir', "3D/010_f"),
+    ('load_subpath', "3D/010/best_weights_ldice.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
-    ('layers_to_not_freeze', None),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
                      101, 105, 106, 114, 115, 119]),
-    ('freeze', False),
-    ('evaluate', True)
+    ('evaluate', False)
+    ))
+    
+loader_kwargs = OrderedDict((
+    ('freeze', True),
+    ('verbose', True),
+    ('layers_to_not_freeze', None),
+    ('freeze_mask', ["classifier"]),
+    ('load_mask', None),
+    ('depth_offset', 0)
     ))
 
 model_kwargs = OrderedDict((
-    ('input_shape', (1, 512, 512)),
+    ('input_shape', (1, 3, 512, 512)),
     ('num_classes', 1),
     ('num_init_blocks', 2),
     ('num_main_blocks', 3),
@@ -33,6 +40,7 @@ model_kwargs = OrderedDict((
     ('num_cycles', 1),
     ('weight_decay', 0.0005), 
     ('dropout', 0.05),
+    ('weight_norm', False),
     ('normalization', BatchNormalization),
     ('mainblock', basic_block),
     ('initblock', basic_block_mp),
@@ -49,16 +57,18 @@ model_kwargs = OrderedDict((
     ('init', VarianceScaling(scale=1., mode='fan_in', distribution='normal')),
     ('nonlinearity', 'selu'),
     ('two_levels', True),
-    ('ndim', 2)
+    ('multi_slice', True),
+    ('ms_ndim_out', 2),
+    ('ndim', 3)
     ))
 
 data_gen_kwargs = OrderedDict((
     ('data_path', "/data/TransientData/Candela/lits_challenge/"
                   "data_liver.zarr"),
     ('nb_io_workers', 1),
-    ('nb_proc_workers', 4),
+    ('nb_proc_workers', 2),
     ('downscale', False),
-    ('num_consecutive', None)
+    ('num_consecutive', [1, None])
     ))
 
 data_augmentation_kwargs = OrderedDict((
@@ -85,7 +95,7 @@ train_kwargs = OrderedDict((
     ('num_classes', 1),
     ('batch_size', 4),
     ('val_batch_size', 4),
-    ('num_epochs', 20),
+    ('num_epochs', 200),
     ('max_patience', 50),
     
     # optimizer
@@ -94,7 +104,7 @@ train_kwargs = OrderedDict((
     
     # other
     ('show_model', False),
-    ('save_every', 10),         # Save predictions every x epochs
+    ('save_every', 1),         # Save predictions every x epochs
     ('mask_to_liver', False),
     ('liver_only', False)
     ))
@@ -104,4 +114,5 @@ run(general_settings=general_settings,
     model_kwargs=model_kwargs,
     data_gen_kwargs=data_gen_kwargs,
     data_augmentation_kwargs=data_augmentation_kwargs,
-    train_kwargs=train_kwargs)
+    train_kwargs=train_kwargs,
+    loader_kwargs=loader_kwargs)
