@@ -361,31 +361,31 @@ def evaluate(model, save_path, num_outputs, liver_only=False, **kwargs):
             predictions = outputs[0:2]
             val_metrics = outputs[2:]
         
-        # Save images
-        def process_slice(s):
-            s = np.squeeze(s).copy()
-            s[s<0]=0
-            s[s>1]=1
-            s[0,0]=1
-            s[0,1]=0
-            return s
-        for i in range(len(batch[0])):
-            s_pred_list = []
-            if num_outputs==1:
-                s_pred_list = [process_slice(predictions[i])]
-            else:
-                for j in range(num_outputs):
-                    s_pred_list.append(process_slice(predictions[j][i]))
-            s_input = process_slice(batch[0][i])
-            if num_outputs==1:
-                s_truth = process_slice(batch[1][i]/2.)
-            else:
-                s_truth = process_slice(batch[1][0][i]/2.)
-            out_image = np.concatenate([s_input]+s_pred_list+[s_truth],
-                                        axis=1)
-            imsave(os.path.join(save_predictions_to,
-                                "{}_{}.png".format(batch_num, i)),
-                    out_image)
+        ## Save images
+        #def process_slice(s):
+            #s = np.squeeze(s).copy()
+            #s[s<0]=0
+            #s[s>1]=1
+            #s[0,0]=1
+            #s[0,1]=0
+            #return s
+        #for i in range(len(batch[0])):
+            #s_pred_list = []
+            #if num_outputs==1:
+                #s_pred_list = [process_slice(predictions[i])]
+            #else:
+                #for j in range(num_outputs):
+                    #s_pred_list.append(process_slice(predictions[j][i]))
+            #s_input = process_slice(batch[0][i])
+            #if num_outputs==1:
+                #s_truth = process_slice(batch[1][i]/2.)
+            #else:
+                #s_truth = process_slice(batch[1][0][i]/2.)
+            #out_image = np.concatenate([s_input]+s_pred_list+[s_truth],
+                                        #axis=1)
+            #imsave(os.path.join(save_predictions_to,
+                                #"{}_{}.png".format(batch_num, i)),
+                    #out_image)
             
         # Update metrics
         val_logs = OrderedDict(zip(model.metrics_names, val_metrics))
@@ -444,19 +444,23 @@ def run(general_settings,
 
     # Split data into train, validation
     num_volumes = 130
-    shuffled_indices = np.arange(num_volumes)
+    exclude = []
     if general_settings['exclude_data'] is not None:
         exclude = general_settings['exclude_data']
-        shuffled_indices = list(set(shuffled_indices).difference(exclude))
-    np.random.shuffle(shuffled_indices)
-    num_train = general_settings['num_train']
     volume_indices = OrderedDict()
-    volume_indices['train'] = shuffled_indices[:num_train]
     if 'validation_set' in general_settings and \
         general_settings['validation_set'] is not None:
         volume_indices['valid'] = general_settings['validation_set']
+        train_indices = [idx for idx in np.arange(num_volumes) \
+                                         if idx not in volume_indices['valid']]
+        train_indices = list(set(train_indices).difference(exclude))
+        volume_indices['train'] = train_indices
     else:
-        volume_indices['valid'] = shuffled_indices[num_train:]
+        indices = list(set(np.arange(num_volumes)).difference(exclude))
+        np.random.shuffle(indices)
+        num_train = general_settings['num_train']
+        volume_indices['train'] = indices[:num_train]
+        volume_indices['valid'] = indices[num_train:]
     train_kwargs.update({'volume_indices': volume_indices})
 
     '''

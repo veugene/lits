@@ -91,8 +91,8 @@ def data_generator(data_path, volume_indices, batch_size,
                    shuffle=False, loop_forever=False, downscale=False,
                    transform_kwargs=None, data_flow_kwargs=None,
                    align_intensity=False, num_consecutive=None,
-                   recurrent=False, truncate_every=3, rng=None,
-                   **kwargs):
+                   expand_dims=True, recurrent=False, truncate_every=3,
+                   rng=None, **kwargs):
     """
     Open data files, wrap data for access, and set up proprocessing; then,
     initialize the generic data_flow.
@@ -159,7 +159,8 @@ def data_generator(data_path, volume_indices, batch_size,
             if downscale:
                 b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
                 b1 = resize_stack(b1, size=(256, 256), interp='nearest')
-            b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
+            if expand_dims:
+                b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
             if transform_kwargs is not None:
                 for idx0, idx1 in zip(np.ndindex(b0.shape[:-3]),
                                     np.ndindex(b1.shape[:-3])):
