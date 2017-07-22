@@ -92,8 +92,8 @@ data_augmentation_kwargs = OrderedDict((
 train_kwargs = OrderedDict((
     # data
     ('num_classes', 1),
-    ('batch_size', 4),
-    ('val_batch_size', 15),
+    ('batch_size', 5),
+    ('val_batch_size', 5),
     ('num_epochs', 19),
     ('max_patience', 50),
     
