@@ -11,7 +11,7 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', "/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "3D/010"),
+    ('save_subdir', "3D/013"),
     ('load_subpath', "orig_rerun/001-1/best_weights_ldice.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),

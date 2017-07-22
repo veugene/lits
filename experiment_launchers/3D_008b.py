@@ -11,14 +11,14 @@ import os
 
 
 general_settings = OrderedDict((
-    ('results_dir', "/export/home/eugene/Experiments/lits/results"),
+    ('results_dir', "/home/eugene/Experiments/lits/results"),
     ('save_subdir', "3D/008b"),
     ('load_subpath', "selu/001-1/best_weights_ldice.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
                      101, 105, 106, 114, 115, 119]),
-    ('evaluate', False)
+    ('evaluate', True)
     ))
     
 loader_kwargs = OrderedDict((
@@ -62,8 +62,7 @@ model_kwargs = OrderedDict((
     ))
 
 data_gen_kwargs = OrderedDict((
-    ('data_path', "/data/TransientData/Candela/lits_challenge/"
-                  "data_liver.zarr"),
+    ('data_path', "/store/Data/lits_challenge/sorted/data_liver.zarr"),
     ('nb_io_workers', 1),
     ('nb_proc_workers', 4),
     ('downscale', False),
@@ -93,7 +92,7 @@ train_kwargs = OrderedDict((
     # data
     ('num_classes', 1),
     ('batch_size', 4),
-    ('val_batch_size', 15),
+    ('val_batch_size', 4),
     ('num_epochs', 200),
     ('max_patience', 50),
     

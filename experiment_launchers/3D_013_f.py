@@ -11,20 +11,20 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', "/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "3D/006c_f2"),
-    ('load_subpath', "3D/006c/best_weights_ldice.hdf5"),
+    ('save_subdir', "3D/013_f"),
+    ('load_subpath', "3D/013/best_weights_ldice.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
                      101, 105, 106, 114, 115, 119]),
-    ('evaluate', True)
+    ('evaluate', False)
     ))
     
 loader_kwargs = OrderedDict((
     ('freeze', True),
     ('verbose', True),
     ('layers_to_not_freeze', None),
-    ('freeze_mask', ['classifier', 'conv_3D']),
+    ('freeze_mask', ["classifier"]),
     ('load_mask', None),
     ('depth_offset', 0)
     ))
@@ -57,6 +57,7 @@ model_kwargs = OrderedDict((
     ('nonlinearity', 'relu'),
     ('two_levels', True),
     ('multi_slice', True),
+    ('ms_ndim_out', 2),
     ('ndim', 3)
     ))
 
@@ -65,7 +66,7 @@ data_gen_kwargs = OrderedDict((
     ('nb_io_workers', 1),
     ('nb_proc_workers', 2),
     ('downscale', False),
-    ('num_consecutive', 1)
+    ('num_consecutive', [1, None])
     ))
 
 data_augmentation_kwargs = OrderedDict((

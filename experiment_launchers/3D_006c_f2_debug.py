@@ -11,13 +11,13 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', "/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "3D/006c_f2"),
-    ('load_subpath', "3D/006c/best_weights_ldice.hdf5"),
+    ('save_subdir', "3D/006c_f2_debug"),
+    ('load_subpath', "3D/006c/pre_e10_weights/best_weights_ldice.hdf5"),
     ('random_seed', 1234),
     ('num_train', 100),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
                      101, 105, 106, 114, 115, 119]),
-    ('evaluate', True)
+    ('evaluate', False)
     ))
     
 loader_kwargs = OrderedDict((
@@ -91,7 +91,7 @@ train_kwargs = OrderedDict((
     # data
     ('num_classes', 1),
     ('batch_size', 4),
-    ('val_batch_size', 4),
+    ('val_batch_size', 15),
     ('num_epochs', 200),
     ('max_patience', 50),
     

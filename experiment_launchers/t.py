@@ -2,6 +2,7 @@ import sys
 sys.path.append("..")
 from collections import OrderedDict
 from keras.layers import BatchNormalization
+from keras.initializers import VarianceScaling
 from lib.blocks import (bottleneck,
                         basic_block,
                         basic_block_mp)
@@ -11,8 +12,8 @@ import os
 
 general_settings = OrderedDict((
     ('results_dir', "/home/eugene/Experiments/lits/results"),
-    ('save_subdir', "3D/006c_f2"),
-    ('load_subpath', "3D/006c/best_weights_ldice.hdf5"),
+    ('save_subdir', "102-1"),
+    ('load_subpath', None),
     ('random_seed', 1234),
     ('num_train', 100),
     ('exclude_data',[32, 34, 38, 41, 47, 83, 87, 89, 91,
@@ -56,14 +57,14 @@ model_kwargs = OrderedDict((
     ('init', 'he_normal'),
     ('nonlinearity', 'relu'),
     ('two_levels', True),
-    ('multi_slice', True),
+    ('multi_slice', False),
     ('ndim', 3)
     ))
 
 data_gen_kwargs = OrderedDict((
     ('data_path', "/store/Data/lits_challenge/sorted/data_liver.zarr"),
     ('nb_io_workers', 1),
-    ('nb_proc_workers', 2),
+    ('nb_proc_workers', 4),
     ('downscale', False),
     ('num_consecutive', 1)
     ))
@@ -92,7 +93,7 @@ train_kwargs = OrderedDict((
     ('num_classes', 1),
     ('batch_size', 4),
     ('val_batch_size', 4),
-    ('num_epochs', 200),
+    ('num_epochs', 10),
     ('max_patience', 50),
     
     # optimizer
@@ -101,7 +102,7 @@ train_kwargs = OrderedDict((
     
     # other
     ('show_model', False),
-    ('save_every', 1),         # Save predictions every x epochs
+    ('save_every', 0),         # Save predictions every x epochs
     ('mask_to_liver', False),
     ('liver_only', False)
     ))
