@@ -24,14 +24,9 @@ def parse():
     parser.add_argument('--output_dir',
                         help="directory to write prediction volumes to",
                         required=True, type=str)
-    parser.add_argument('--liver_data_files',
-                        help="paths to volumes with liver labels (used to "
-                             "limit prediction to slices that contain liver); "
-                             "files should have the same names as in the " "data_dir",
-                        required=False, nargs='+', type=str)
     parser.add_argument('--liver_extent',
                         help="how many slices to include adjacent to the "
-                             "liver",
+                             "liver (used with --use_predicted_liver)",
                         required=False, type=int, default=0)
     parser.add_argument('--many_orientations',
                         help="average predictions over all 4 possible flips.",
@@ -41,8 +36,11 @@ def parse():
                              "resolution (256, 256)",
                         required=False, action='store_true')
     parser.add_argument('--use_predicted_liver',
-                        help="whether to clip to predicted volumes rather "
-                             "than ground truth volumes",
+                        help="whether to crop to predicted liver volumes ",
+                        required=False, action='store_true')
+    parser.add_argument('--raw_outputs',
+                        help="whether to output raw probability values rather "
+                             "than classes",
                         required=False, action='store_true')
     parser.add_argument('--batch_size',
                         help="batch size for prediction",
@@ -60,8 +58,9 @@ def preprocess(volume, downscale=False):
     return out
 
 
-def postprocess(volume, downscale=False):
-    out = (volume >= 0.5).astype(np.int16)
+def postprocess(volume, raw=False, downscale=False):
+    if raw:
+        out = (volume >= 0.5).astype(np.int16)
     out = np.squeeze(out, axis=1)
     if downscale:
         out = resize_stack(out, size=(512, 512), interp='nearest')
@@ -148,6 +147,7 @@ def predict(volume, model, batch_size, many_orientations):
     num_outputs = len(model.outputs)
     predictions = [None for i in range(num_outputs)]
     for i in range(num_ops):
+        print("i: ", i)
         op_set = ops[i]
         v = volume.T
         for op in op_set:
@@ -184,12 +184,6 @@ if __name__=='__main__':
     
     model = load_model(args.model_path)
     
-    ldata_iter = None
-    if args.liver_data_files is not None:
-        if not hasattr(args.liver_data_files, '__len__'):
-            ldata_iter = iter([args.liver_data_files])
-        else:
-            ldata_iter = iter(args.liver_data_files)
     for path in sorted(args.data_files):
         fn = path.split('/')[-1]
         if fn.endswith(".nii"):
@@ -213,18 +207,18 @@ if __name__=='__main__':
         outputs = predict(input_volume, model, args.batch_size,
                           args.many_orientations)
         outputs = [postprocess(out,
+                               raw=args.raw_outputs,
                                downscale=args.downscale) for out in outputs]
-        if ldata_iter or args.use_predicted_liver:
-            if ldata_iter:
-                liver_path = next(ldata_iter)
-                liver_f = sitk.ReadImage(liver_path)
-                liver_np = sitk.GetArrayFromImage(liver_f)
-            else:
-                liver_np = outputs[1]
-            indices, liver_np = select_slices(liver_np, args.liver_extent)
+        if args.use_predicted_liver or not args.raw_outputs:
+            indices, liver_mask = select_slices(outputs[1], args.liver_extent)
+        if args.use_predicted_liver:
             outputs[0][:indices[0]] = 0
             outputs[0][indices[-1]:] = 0
-            outputs[1][...] = liver_np
+        if not args.raw_outputs:
+            outputs[1][...] = liver_mask
+        elif args.use_predicted_liver:
+            outputs[1][:indices[0]] = 0
+            outputs[1][indices[-1]:] = 0
         for i, output_volume in enumerate(outputs):
             out_f = sitk.GetImageFromArray(output_volume)
             out_f.SetSpacing(im_f.GetSpacing())
