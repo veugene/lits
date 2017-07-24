@@ -106,9 +106,8 @@ def assemble_base_model(**model_kwargs):
     model_lesion_kwargs = copy.copy(model_kwargs)
     model_lesion_kwargs['num_outputs'] = 1
     model_lesion_kwargs['num_classes'] = None
-    model_lesion_kwargs['input_shape'] = \
-                                (liver_output_pre._keras_shape[1]+1,)\
-                                +input_shape[1:]
+    model_lesion_kwargs['input_shape'] = (liver_output_pre._keras_shape[1]\
+                                          +input_shape[-3],)+input_shape[1:]
     model_lesion = assemble_cycled_model(**model_lesion_kwargs)
     
     # Connect first model to second
@@ -144,8 +143,8 @@ def assemble_model_two_levels(adversarial=False, num_residuals_bottom=None,
     # Assemble second model on top (lesion)
     model_lesion_kwargs = copy.copy(model_kwargs)
     model_lesion_kwargs['num_outputs'] = 1
-    model_lesion_kwargs['input_shape'] = (liver_output_pre._keras_shape[1]+1,)\
-                                         +input_shape[1:]
+    model_lesion_kwargs['input_shape'] = (liver_output_pre._keras_shape[1]\
+                                          +input_shape[-3],)+input_shape[1:]
     model_lesion = assemble_cycled_model(**model_lesion_kwargs)
     
     # Connect first model to second
