@@ -212,28 +212,50 @@ def data_generator(data_path, volume_indices, batch_size, mode='slices',
                          'slices_recurrent', 'volumes'))
     
     # Function to rescale the data and do data augmentation, if requested.
+    def preprocess_stack_pair(batch):
+        b0, b1 = batch
+        if align_intensity:
+            mean_liver = np.mean(b0[b1==1])
+            b0 += 100 - mean_liver
+        if downscale:
+            b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
+            b1 = resize_stack(b1, size=(256, 256), interp='nearest')
+        if expand_dims:
+            b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
+        if transform_kwargs is not None:
+            for idx0, idx1 in zip(np.ndindex(b0.shape[:-3]),
+                                  np.ndindex(b1.shape[:-3])):
+                x, y = random_transform(b0[idx0], b1[idx1], **transform_kwargs)
+                # TODO properly pass rng to random_transform
+                b0[idx0], b1[idx1] = x, y
+        # Standardize
+        b0 /= 255.0
+        b0 = np.clip(b0, -2.0, 2.0)
+        return b0, b1
+    
+    # Function to rescale the data and do data augmentation, if requested.
+    # 
+    # Handles volumes, slices, and cases where there are multiple 
+    # input/output pairs.
     def preprocessor(batch):
+        # Could have multiple pairs of input, target. Iterate over pairs.
         ret_batch = []
         for i, j in zip(range(0, len(batch), 2), range(1, len(batch), 2)):
-            b0, b1 = batch[i], batch[j]
-            if align_intensity:
-                mean_liver = np.mean(b0[b1==1])
-                b0 += 100 - mean_liver
-            if downscale:
-                b0 = resize_stack(b0, size=(256, 256), interp='bilinear')
-                b1 = resize_stack(b1, size=(256, 256), interp='nearest')
-            if expand_dims:
-                b0, b1 = np.expand_dims(b0, 1), np.expand_dims(b1, 1)
-            if transform_kwargs is not None:
-                for idx0, idx1 in zip(np.ndindex(b0.shape[:-3]),
-                                    np.ndindex(b1.shape[:-3])):
-                    x, y = random_transform(b0[idx0], b1[idx1], **transform_kwargs)
-                    # TODO properly pass rng to random_transform
-                    b0[idx0], b1[idx1] = x, y
-            # standardize
-            b0 /= 255.0
-            b0 = np.clip(b0, -2.0, 2.0)
-            ret_batch.extend([b0, b1])
+            if mode=='volumes':
+                # Go through every stackvolume
+                # (batch[i]/batch[j] may not be ndarray; volume batch cannot 
+                # just be wrapped in np.array() since volumes have different
+                # lengths)
+                batch_pair = [[], []]
+                for batch in zip(batch[i], batch[j]):
+                    b0, b1 = preprocess_stack_pair(batch)
+                    batch_pair[0].append(b0)
+                    batch_pair[1].append(b1)
+                ret_batch.extend(batch_pair)
+            else:
+                b0, b1 = np.array(batch[0]), np.array(batch[1])
+                b0, b1 = preprocess_stack_pair((b0, b1))
+                ret_batch.extend([b0, b1])
         return tuple(ret_batch)
     
     # Prepare the data iterator.
