@@ -91,8 +91,7 @@ def data_generator(data_path, volume_indices, batch_size,
                    shuffle=False, loop_forever=False, downscale=False,
                    transform_kwargs=None, data_flow_kwargs=None,
                    align_intensity=False, num_consecutive=None,
-                   expand_dims=True, recurrent=False, truncate_every=3,
-                   rng=None, **kwargs):
+                   expand_dims=True, truncate_every=3, rng=None):
     """
     Open data files, wrap data for access, and set up proprocessing; then,
     initialize the generic data_flow.
@@ -184,7 +183,7 @@ def data_generator(data_path, volume_indices, batch_size,
                                        nb_proc_workers=nb_proc_workers,
                                        shuffle=shuffle, 
                                        loop_forever=loop_forever,
-                                       rng=rng, **kwargs)
+                                       rng=rng, **data_flow_kwargs)
     else:
         data_gen = data_flow(data=[msa_vol, msa_seg],
                              batch_size=batch_size,
@@ -193,7 +192,7 @@ def data_generator(data_path, volume_indices, batch_size,
                              shuffle=shuffle, 
                              loop_forever=loop_forever,
                              preprocessor=preprocessor,
-                             rng=rng, **kwargs)
+                             rng=rng, **data_flow_kwargs)
     return data_gen
 
 
