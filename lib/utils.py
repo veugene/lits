@@ -95,6 +95,57 @@ def data_generator(data_path, volume_indices, batch_size, mode='slices',
     """
     Open data files, wrap data for access, and set up proprocessing; then,
     initialize the generic data_flow.
+    
+    data_path : string - The path to the zarr file containing the data.
+        The file is expected to have subgroups 'volume' and 'segmentation',
+        each with a set of volumes with unique integer indices (integer
+        indices shared across 'volume' and 'segmentation').
+    volume_indices : int list - A list specifying the indices of the volumes to
+        use in the data iterator.
+    batch_size : int - The maximum number of elements to yield from each data
+        array in a batch. The actual batch size is the smallest of either this
+        number or the number of elements not yet yielded in the current epoch.
+    mode : string, can be 'slices', 'slices_recurrent', 'volumes'.
+        In 'slices' mode, slices are shuffled across all selected volumes; 
+        iterator returns slices.
+        In 'slices_recurrent' mode, each minibatch contains sets of 
+        `truncate_every` slices for each volume in the minibatch, following
+        the pattern for stateful RNNs in keras.
+        In 'volumes' mode, selected volumes are shuffled; volumes are returned.
+    nb_io_workers : int - The number of parallel threads to preload data.
+        NOTE that if nb_io_workers > 1, data is loaded asynchronously.
+    nb_proc_workers : int - The number of parallel processes to do 
+        preprocessing of data using the _process_batch function. If
+        nb_proc_workers is set to 0, no parallel processes will be launched;
+        instead, any preprocessing will be done in the preload thread and data
+        will have to pass through only one queue rather than two queues.
+        NOTE that if nb_proc_workers > 1, data processing is asynchronous and
+        data will not be yielded in the order that it is loaded!
+    shuffle : bool - If True, access the elements of the data arrays in random
+        order.
+    loop_forever : bool -  If False, stop iteration at the end of an epoch 
+        (when all data has been yielded once).
+    downscale : bool - If True, downscale all slices by 2 (eg. 512x512 to
+        256x156. Volumes have axial slices downscaled.
+    transform_kwargs : dict - Keyword arguments passed to random_transform for
+        data augmentation.
+    data_flow_kwargs : dict - Keyword arguments passed to data_flow.
+    align_intensity : bool - If True, shift image intensity so that the mean
+        liver intensity is 100 (before standardization).
+    num_consecutive : int OR int list - For every (axial) slice, modify slice
+        access so that requesting that slice returns num_consecutive slices 
+        above and num_consecutive slices below, as well. For example, with
+        num_consecutive=1, when indexing into array A with shape (100,50,50),
+        A[25] would return a slice of shape (3, 50, 50) and A[5:10] would
+        return a block with shape (5, 3, 50, 50).
+    expand_dims : bool - If True, add an axis (size 1), at location 1. For
+        example, expand (25, 50, 50) to (25, 1, 50, 50).
+    truncate_every : int - Used in mode=='slices_recurrent' to set the number
+        of consecutive slices to include in a minibatch for each volume. This
+        effectively sets the number of slices across which the gradient from
+        backpropagation through time is truncated.
+    rng : numpy RandomState - the random number generator used for shuffling.
+        TODO: make it used for data augmentation, too.
     """
     
     if rng is None:
@@ -271,6 +322,12 @@ class recurrent_generator(object):
         #if self.num_samples%self.batch_size > 0:
             #self.num_batches += 1
         self.num_batches = 1000 # HACK
+        # TODO: compute num_batches taking into consideration the number of 
+        # volumes, the batch size, the length of volumes, which volumes will
+        # be grouped together in each batch, and the truncate_every setting.
+        #
+        # It's a bit tricky and may require storing volume size information
+        # in 'data'.
         
         self.reset_states = threading.Event()
                 
