@@ -4,6 +4,9 @@ declare -a metrics=(dice_loss_2 dice_2 dice_loss_2_m0 dice_2_m0 dice_loss_1_2 di
 if [[ $OUTPUT_NAME == 1 ]]; then
     metrics=(output_0_dice_loss_2 output_0_dice_2 output_0_dice_loss_2_m0 output_0_dice_2_m0 output_1_dice_loss_1_2 output_1_dice_1_2)
 fi
+if [[ $OUTPUT_NAME == 2 ]]; then
+    metrics=(dice fdice masked_dice_loss)
+fi
 for m in "${metrics[@]}"
 do
     min_y=0
