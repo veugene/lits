@@ -6,7 +6,6 @@ from keras.layers import (Input,
                           Lambda,
                           Dense,
                           Reshape,
-                          ConvLSTM2D,
                           Bidirectional,
                           TimeDistributed)
 from keras.layers.merge import concatenate as merge_concatenate
@@ -392,10 +391,10 @@ class Bidirectional_(Bidirectional):
         self.supports_masking = True
     
     
-def assemble_model_lstm(input_shape, num_filters, num_classes, 
-                        normalization=LayerNorm, norm_kwargs=None,
-                        weight_norm=False, num_outputs=1,
-                        weight_decay=0.0005, init='he_normal'):
+def assemble_model_recurrent(input_shape, num_filters, num_classes, 
+                             normalization=LayerNorm, norm_kwargs=None,
+                             weight_norm=False, num_outputs=1,
+                             weight_decay=0.0005, init='he_normal'):
     from recurrentshop import RecurrentModel
     assert(num_outputs==1)
         
@@ -416,7 +415,7 @@ def assemble_model_lstm(input_shape, num_filters, num_classes,
                           'weight_norm': weight_norm,
                           'kernel_initializer': init}
     
-    # LSTM input.
+    # GRU input.
     x_t = Convolution(**convolution_kwargs,
                       kernel_regularizer=_l2(weight_decay),
                       activation='relu',
@@ -424,7 +423,7 @@ def assemble_model_lstm(input_shape, num_filters, num_classes,
     if normalization is not None:
         x_t = normalization(**norm_kwargs)(x_t)
     
-    # LSTM block.
+    # GRU block.
     gate_replace_x = Convolution(**convolution_kwargs,
                                  kernel_regularizer=_l2(weight_decay),
                                  activation='sigmoid',
@@ -469,7 +468,7 @@ def assemble_model_lstm(input_shape, num_filters, num_classes,
     hidden_t = Lambda(function=lambda ins: ins[2]*ins[0] + (1-ins[2])*ins[1],
                       output_shape=lambda x:x[0])(lambda_inputs)
     
-    # LSTM output.
+    # GRU output.
     out_t = Convolution(**convolution_kwargs,
                         kernel_regularizer=_l2(weight_decay),
                         activation='relu',
@@ -493,7 +492,7 @@ def assemble_model_lstm(input_shape, num_filters, num_classes,
     
     # Make it a recurrent block.
     #
-    # NOTE: a bidirectional 'stateful' LSTM has states passed between blocks
+    # NOTE: a bidirectional 'stateful' GRU has states passed between blocks
     # of the reverse path in non-temporal order. Only the forward pass is
     # stateful in sequential/temporal order.
     cobject = {LayerNorm.__name__: LayerNorm}
@@ -512,7 +511,7 @@ def assemble_model_lstm(input_shape, num_filters, num_classes,
 
 def assemble_model(model_type='two_levels', num_residuals_bottom=None,
                    ms_ndim_out=3, discriminator_kwargs=None, **model_kwargs):
-    # Model types: two_levels, adversarial, multi_slice, lstm, simple
+    # Model types: two_levels, adversarial, multi_slice, recurrent, simple
     # (`num_residuals_bottom` only used with two_levels)
     # (`ms_ndim_out` only used with multi_slice)
     # (`discriminator_kwargs` only used with adversarial)
@@ -545,11 +544,11 @@ def assemble_model(model_type='two_levels', num_residuals_bottom=None,
         model = assemble_model_multi_slice(
             ms_ndim_out=ms_ndim_out,
             **model_kwargs)
-    if model_type=='lstm':
+    if model_type=='recurrent':
         '''
-        A simple, stateful, 2D convolutional LSTM.
+        A simple, stateful, 2D convolutional GRU.
         '''
-        model = assemble_model_lstm(**model_kwargs)
+        model = assemble_model_recurrent(**model_kwargs)
     if model_type=='simple':
         '''
         A single FCN.
