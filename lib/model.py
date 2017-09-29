@@ -149,7 +149,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
             skips[cycle][direction][depth] = conv_layer
             x = conv_layer(x)
         out = merge_add([x, into])
-        if weight_norm and normalization is None:
+        if normalization is None:
             # Divide sum by two.
             out = Lambda(lambda x: x/2., output_shape=lambda x: x)(out)
         return out
@@ -217,7 +217,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     outputs.append(out)
                 if len(outputs)>1:
                     out = merge_add(outputs)
-                    if weight_norm and normalization is None:
+                    if normalization is None:
                         # Divide sum by two.
                         out = Lambda(lambda x: x/2.,
                                      output_shape=lambda x: x)(out)
