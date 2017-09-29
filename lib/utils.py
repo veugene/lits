@@ -86,7 +86,7 @@ class consecutive_slice_view(delayed_view):
             item_block[i] = elem
         return item_block
 
-def data_generator(data_path, volume_indices, batch_size,
+def data_generator(data_path, volume_indices, batch_size, mode='slices',
                    nb_io_workers=1, nb_proc_workers=0,
                    shuffle=False, loop_forever=False, downscale=False,
                    transform_kwargs=None, data_flow_kwargs=None,
@@ -144,8 +144,16 @@ def data_generator(data_path, volume_indices, batch_size,
         segmentations = segmentations_c
             
     # Combine all slices in a single array.
-    msa_vol = multi_source_array(source_list=volumes, shuffle=False)
-    msa_seg = multi_source_array(source_list=segmentations, shuffle=False)
+    if mode=='slices':
+        data_vol = multi_source_array(source_list=volumes, shuffle=False)
+        data_seg = multi_source_array(source_list=segmentations, shuffle=False)
+    elif mode=='volumes' or mode=='slices_recurrent':
+        data_vol = volumes
+        data_seg = segmentations
+    else:
+        raise ValueError("mode \'{}\' unrecognized - valid modes are: "
+                         "\'{}\' \'{}\' \'{}\'".format(mode, 'slices',
+                         'slices_recurrent', 'volumes'))
     
     # Function to rescale the data and do data augmentation, if requested.
     def preprocessor(batch):
@@ -175,8 +183,8 @@ def data_generator(data_path, volume_indices, batch_size,
     # Prepare the data iterator.
     if data_flow_kwargs is None:
         data_flow_kwargs = {}
-    if recurrent:
-        data_gen = recurrent_generator(data=[volumes, segmentations],
+    if mode=='slices_recurrent':
+        data_gen = recurrent_generator(data=[data_vol, data_seg],
                                        batch_size=batch_size,
                                        truncate_every=truncate_every,
                                        nb_io_workers=nb_io_workers,
@@ -185,7 +193,7 @@ def data_generator(data_path, volume_indices, batch_size,
                                        loop_forever=loop_forever,
                                        rng=rng, **data_flow_kwargs)
     else:
-        data_gen = data_flow(data=[msa_vol, msa_seg],
+        data_gen = data_flow(data=[data_vol, data_seg],
                              batch_size=batch_size,
                              nb_io_workers=nb_io_workers,
                              nb_proc_workers=nb_proc_workers,
@@ -353,6 +361,14 @@ class recurrent_generator(object):
 
 
 class volume_generator(object):
+    """
+    Deprecated - kept only for predict.py because it returns vol_idx. 
+    Does not shuffle volumes and batch size is always 1.
+    
+    USE data_generator with mode='volumes' instead !!!
+    
+    TODO: remove this class, update or remove predict.py
+    """
     def __init__(self, data_path, volume_indices,
                  nb_io_workers=1, nb_proc_workers=0, downscale=False, 
                  return_vol_idx=False, num_consecutive=None):
