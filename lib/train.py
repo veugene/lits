@@ -38,9 +38,9 @@ from .utils import (data_generator,
 def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                   optimizer, save_path, volume_indices, data_gen_kwargs,
                   data_augmentation_kwargs=None, learning_rate=0.001,
-                  num_outputs=1, adversarial=False, adv_weight=0.2,
-                  save_every=0, mask_to_liver=False, show_model=True,
-                  liver_only=False):
+                  clipnorm=10, num_outputs=1, adversarial=False, 
+                  adv_weight=0.2, save_every=0, mask_to_liver=False,
+                  show_model=True, liver_only=False):
     
     if data_augmentation_kwargs is None:
         data_augmentation_kwargs = {}
@@ -218,27 +218,27 @@ def prepare_model(model, num_classes, batch_size, val_batch_size, max_patience,
                             rho=0.9,
                             epsilon=1e-8,
                             decay=0.,
-                            clipnorm=10)
+                            clipnorm=clipnorm)
     elif optimizer=='nadam':
         optimizer = nadam(lr=learning_rate,
                           beta_1=0.9,
                           beta_2=0.999,
                           epsilon=1e-08,
                           schedule_decay=0,
-                          clipnorm=10)
+                          clipnorm=clipnorm)
     elif optimizer=='adam':
         optimizer = adam(lr=learning_rate,
                          beta_1=0.9,
                          beta_2=0.999,
                          epsilon=1e-08,
                          decay=0,
-                         clipnorm=10)
+                         clipnorm=clipnorm)
     elif optimizer=='sgd':
         optimizer = SGD(lr=learning_rate,
                         momentum=0.9,
                         decay=0.,
                         nesterov=True,
-                        clipnorm=10)
+                        clipnorm=clipnorm)
     else:
         raise ValueError("Unknown optimizer: {}".format(optimizer))
     if not hasattr(model, 'optimizer'):
