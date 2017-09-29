@@ -48,11 +48,16 @@ def parse():
     return parser.parse_args()
     
     
-def preprocess(volume, downscale=False):
+def preprocess(volume, input_shape, downscale=False):
+    if input_shape[-3]>1:
+        # 3D or thick input
+        volume = consecutive_slice_view(volume, num_consecutive=1)[...]
     out = volume.astype(np.float32)
     if downscale:
         out = resize_stack(out,size=(256, 256), interp='bilinear')
-    out = np.expand_dims(out, 1)
+    if len(input_shape)==5 or input_shape[-3]==1:
+        # 3D or normal
+        out = np.expand_dims(out, 1)
     out /= 255.
     out = np.clip(out, -2., 2.)
     return out
@@ -60,6 +65,8 @@ def preprocess(volume, downscale=False):
 
 def postprocess(volume, raw=False, downscale=False):
     if raw:
+        out = volume.astype(np.float32)
+    else:
         out = (volume >= 0.5).astype(np.int16)
     out = np.squeeze(out, axis=1)
     if downscale:
@@ -201,9 +208,9 @@ if __name__=='__main__':
 
         im_f = sitk.ReadImage(path)
         im_np = sitk.GetArrayFromImage(im_f)
-        if model.inputs[0].ndim==5:
-            im_np = consecutive_slice_view(im_np, num_consecutive=1)[...]
-        input_volume = preprocess(im_np, downscale=args.downscale)
+        input_volume = preprocess(im_np, 
+                                  model.input_shape,
+                                  downscale=args.downscale)
         outputs = predict(input_volume, model, args.batch_size,
                           args.many_orientations)
         outputs = [postprocess(out,
