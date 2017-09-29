@@ -27,8 +27,8 @@ from .callbacks import (Dice,
                         SavePredictions,
                         FileLogger)
 from .model_variants import assemble_model
-from .normalization_layers import (WeightNorm,
-                                   LayerNorm)
+from .layers import (WeightNorm,
+                     LayerNorm)
 from .loss import dice_loss
 from .utils import (data_generator,
                     repeat_flow,

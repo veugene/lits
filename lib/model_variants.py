@@ -25,8 +25,8 @@ from .blocks import (Convolution,
                      basic_block_mp,
                      residual_block,
                      get_nonlinearity)
-from .normalization_layers import (LayerNorm,
-                                   WeightNorm)
+from .layers import (LayerNorm,
+                     WeightNorm)
 
 
 def assemble_cnn(input_shape, num_classes, num_init_blocks, num_main_blocks,
