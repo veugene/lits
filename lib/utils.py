@@ -137,7 +137,12 @@ def data_generator(data_path, volume_indices, batch_size, mode='slices',
         above and num_consecutive slices below, as well. For example, with
         num_consecutive=1, when indexing into array A with shape (100,50,50),
         A[25] would return a slice of shape (3, 50, 50) and A[5:10] would
-        return a block with shape (5, 3, 50, 50).
+        return a block with shape (5, 3, 50, 50). If num_consecutive is an int,
+        both the input images and the target segmentations will be expanded
+        with the same number; a list of two integers will set a separate 
+        expansion for input images and target segmentations, respectively.
+        A value of `None` results in no expansion while a value of 0 still
+        adds a new axis (eg. (3, 50, 50) --> (3, 1, 50, 50).
     expand_dims : bool - If True, add an axis (size 1), at location 1. For
         example, expand (25, 50, 50) to (25, 1, 50, 50).
     truncate_every : int - Used in mode=='slices_recurrent' to set the number
