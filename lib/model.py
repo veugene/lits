@@ -173,6 +173,7 @@ def assemble_model(input_shape, num_classes, num_init_blocks, num_main_blocks,
                     'weight_decay': weight_decay,
                     'num_residuals': num_residuals,
                     'norm_kwargs': norm_kwargs,
+                    'nonlinearity': nonlinearity,
                     'init': init,
                     'ndim': ndim}
     if norm_kwargs is None:
